@@ -1091,6 +1091,7 @@ impl ApplicationHandler for FosforaApp {
                                     )
                                 }),
                                 catalog_thumbs: &mut app.catalog_thumbs,
+                                media_packs: &app.media_packs,
                                 scene: &scene_info,
                                 bindings: &app.binding_bus,
                             };
@@ -2283,6 +2284,15 @@ impl ApplicationHandler for FosforaApp {
                             app.preset_store.mark_dirty();
                         }
                     }
+                }
+
+                // A media-pack clip clicked or dropped in the catalog's Media
+                // tab; the packs reload when tessera rewrites a manifest.
+                app.poll_media_packs();
+                let media_add =
+                    crate::ui::panels::catalog_media::take_add(&app.egui_overlay.context());
+                if let Some((key, at)) = media_add {
+                    app.add_pack_media(&key, at);
                 }
 
                 // Handle preset signals from UI

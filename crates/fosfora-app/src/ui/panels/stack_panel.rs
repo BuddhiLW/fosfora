@@ -18,6 +18,7 @@ use egui::{Color32, RichText, Sense, Stroke, TextureId, Ui, UiBuilder, Vec2};
 
 use crate::gpu::layer::{ChainBadge, LayerInfo};
 use crate::gpu::layer_thumbs::{LayerThumbs, ThumbKind};
+use crate::ui::panels::catalog_media::{self, MediaDrag};
 use crate::ui::panels::catalog_panel::{self, CatalogDrop, EffectDrag};
 use crate::ui::theme::colors::theme_colors;
 
@@ -734,17 +735,33 @@ fn drop_target(
     zone: impl FnOnce(f32) -> Option<CatalogDrop>,
 ) {
     let ctx = ui.ctx();
-    if !resp.contains_pointer() || !egui::DragAndDrop::has_payload_of_type::<EffectDrag>(ctx) {
+    let media = egui::DragAndDrop::payload::<MediaDrag>(ctx);
+    if !resp.contains_pointer()
+        || !(media.is_some() || egui::DragAndDrop::has_payload_of_type::<EffectDrag>(ctx))
+    {
         return;
     }
     let Some(pos) = ctx.pointer_latest_pos() else {
         return;
     };
-    let Some(at) = zone(pos.y) else {
+    let Some(mut at) = zone(pos.y) else {
         return;
     };
-    let Some(drag) = egui::DragAndDrop::payload::<EffectDrag>(ctx) else {
-        return;
+    let drag = match &media {
+        // A clip always arrives as a layer of its own: onto a row means
+        // above it.
+        Some(m) => {
+            if let CatalogDrop::Replace(i) = at {
+                at = CatalogDrop::Insert(i);
+            }
+            EffectDrag {
+                name: m.title.clone(),
+            }
+        }
+        None => match egui::DragAndDrop::payload::<EffectDrag>(ctx) {
+            Some(d) => (*d).clone(),
+            None => return,
+        },
     };
     let refused = refusal(layers, at);
     let tc = theme_colors(ctx);
@@ -793,7 +810,15 @@ fn drop_target(
     painter.galley(pill.min + Vec2::new(8.0, 4.0), galley, tc.text_primary);
 
     if refused.is_none() && ctx.input(|i| i.pointer.any_released()) {
-        if let Some(drag) = egui::DragAndDrop::take_payload::<EffectDrag>(ctx) {
+        // `take_payload` empties the slot before it checks the type, so ask
+        // for the type that is there: a wrong guess would drop the drag.
+        if let Some(m) = media {
+            egui::DragAndDrop::clear_payload(ctx);
+            select_master(ctx, false);
+            if let CatalogDrop::Insert(pos) = at {
+                catalog_media::send_add(ctx, m.key.clone(), pos);
+            }
+        } else if let Some(drag) = egui::DragAndDrop::take_payload::<EffectDrag>(ctx) {
             select_master(ctx, false);
             catalog_panel::send_drop(ctx, drag.name.clone(), at);
         }

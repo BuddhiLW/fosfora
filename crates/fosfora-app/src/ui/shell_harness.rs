@@ -55,6 +55,7 @@ pub(crate) struct ShellHarness {
     pub layers: Vec<LayerInfo>,
     settings: SettingsConfig,
     thumbs: CatalogThumbs,
+    media_packs: crate::media::pack_watch::MediaPacks,
     scene: SceneInfo,
     time: f64,
     /// The first request to leave the view a tour step shows, seen between
@@ -192,6 +193,7 @@ impl ShellHarness {
             settings: SettingsConfig::default(),
             // Nowhere: the cards draw without pictures.
             thumbs: CatalogThumbs::new("/nonexistent".into()),
+            media_packs: crate::media::pack_watch::MediaPacks::empty(),
             scene: super::panels::cue_strip::sample(false),
             time: 0.0,
             leaving: None,
@@ -309,6 +311,7 @@ impl ShellHarness {
                 postfx_matches: &[],
                 display: None,
                 catalog_thumbs: &mut self.thumbs,
+                media_packs: &self.media_packs,
                 scene: &self.scene,
                 bindings: &self.bindings,
             };

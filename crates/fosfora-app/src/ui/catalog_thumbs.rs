@@ -74,9 +74,24 @@ impl CatalogThumbs {
     pub fn get(&mut self, ctx: &egui::Context, effect: &PfxEffect) -> Option<TextureId> {
         let stem = stem_of(effect)?;
         if !self.cache.contains_key(&stem) {
-            let tex = find(&self.dir, &stem).and_then(|path| match decode(&path) {
+            let path = find(&self.dir, &stem);
+            return self.still(ctx, &stem, path.as_deref());
+        }
+        self.cache.get(&stem)?.as_ref().map(|t| t.id())
+    }
+
+    /// The still at `path`, filed under `key`: decoded the first time it is
+    /// asked for, then kept. `None` when there is no file or it is unreadable.
+    pub fn still(
+        &mut self,
+        ctx: &egui::Context,
+        key: &str,
+        path: Option<&Path>,
+    ) -> Option<TextureId> {
+        if !self.cache.contains_key(key) {
+            let tex = path.and_then(|path| match decode(path) {
                 Ok(img) => Some(ctx.load_texture(
-                    format!("catalog_thumb_{stem}"),
+                    format!("catalog_thumb_{key}"),
                     img,
                     TextureOptions::LINEAR,
                 )),
@@ -85,9 +100,22 @@ impl CatalogThumbs {
                     None
                 }
             });
-            self.cache.insert(stem.clone(), tex);
+            self.cache.insert(key.to_string(), tex);
         }
-        self.cache.get(&stem)?.as_ref().map(|t| t.id())
+        self.cache.get(key)?.as_ref().map(|t| t.id())
+    }
+
+    /// Has the still filed under `key` been looked for already (found or not)?
+    pub fn is_cached(&self, key: &str) -> bool {
+        self.cache.contains_key(key)
+    }
+
+    /// Drop every still and loop filed under a key starting with `prefix`,
+    /// so the next ask decodes the file again (a media pack was rewritten).
+    pub fn forget_prefix(&mut self, prefix: &str) {
+        self.cache.retain(|k, _| !k.starts_with(prefix));
+        self.anims.retain(|k, _| !k.starts_with(prefix));
+        self.recent.retain(|k| !k.starts_with(prefix));
     }
 }
 
@@ -101,6 +129,21 @@ impl CatalogThumbs {
         secs: f64,
     ) -> Option<TextureId> {
         let stem = stem_of(effect)?;
+        let path = self.dir.join(format!("{stem}.anim.webp"));
+        self.animated_file(ctx, &stem, &path, secs)
+    }
+
+    /// The animated WebP at `path`, filed under `key`, at the frame for
+    /// `secs` into the hover. It decodes on a thread the first time; `None`
+    /// until then, or when there is no such file.
+    pub fn animated_file(
+        &mut self,
+        ctx: &egui::Context,
+        key: &str,
+        path: &Path,
+        secs: f64,
+    ) -> Option<TextureId> {
+        let stem = key.to_string();
         self.recent.retain(|s| *s != stem);
         self.recent.push_back(stem.clone());
         while self.recent.len() > KEEP_ANIMS {
@@ -108,9 +151,8 @@ impl CatalogThumbs {
                 self.anims.remove(&old);
             }
         }
-        let dir = &self.dir;
         let anim = self.anims.entry(stem.clone()).or_insert_with(|| {
-            let path = dir.join(format!("{stem}.anim.webp"));
+            let path = path.to_path_buf();
             if !path.is_file() {
                 return Anim::Missing;
             }

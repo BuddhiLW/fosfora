@@ -110,6 +110,8 @@ pub struct ShellState<'a> {
     pub display: Option<(egui::TextureId, f32)>,
     /// The catalog's pictures (#3124).
     pub catalog_thumbs: &'a mut crate::ui::catalog_thumbs::CatalogThumbs,
+    /// The media packs the catalog's Media tab shows.
+    pub media_packs: &'a crate::media::pack_watch::MediaPacks,
     /// Scenes, the current cue list and where the timeline is (#3173).
     pub scene: &'a scene_panel::SceneInfo,
     /// The bindings, read for what drives each control (#3127). Made and
@@ -590,6 +592,7 @@ fn bottom_drawer(ctx: &Context, s: &mut ShellState<'_>, fill: egui::Color32, ws:
                     catalog_panel::draw_catalog(
                         ui,
                         s.effect_loader,
+                        s.media_packs,
                         &s.settings.favorite_effects,
                         s.catalog_thumbs,
                         &target,
