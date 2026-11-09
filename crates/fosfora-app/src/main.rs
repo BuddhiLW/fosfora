@@ -1162,37 +1162,10 @@ impl ApplicationHandler for FosforaApp {
                         &mut app.binding_matrix,
                         &mut app.binding_bus,
                         || {
-                            let layers = app
-                                .layer_stack
-                                .layers
-                                .iter()
-                                .enumerate()
-                                .map(|(i, l)| {
-                                    let effect_name = l
-                                        .effect_index()
-                                        .and_then(|idx| app.effect_loader.effects.get(idx))
-                                        .map(|eff| eff.name.clone())
-                                        .unwrap_or_default();
-                                    let param_names = l
-                                        .param_store
-                                        .defs
-                                        .iter()
-                                        .filter(|d| {
-                                            matches!(
-                                                d,
-                                                crate::params::ParamDef::Float { .. }
-                                                    | crate::params::ParamDef::Bool { .. }
-                                            )
-                                        })
-                                        .map(|d| d.name().to_string())
-                                        .collect();
-                                    crate::ui::panels::binding_helpers::LayerParamInfo {
-                                        index: i,
-                                        effect_name,
-                                        param_names,
-                                    }
-                                })
-                                .collect();
+                            let layers = fosfora_app::control::ops::bindings::actions::layer_param_infos(
+                                &app.layer_stack,
+                                &app.effect_loader,
+                            );
                             crate::ui::panels::binding_helpers::BindingPanelInfo {
                                 layers,
                                 active_layer,
@@ -1532,10 +1505,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_band_scale")));
                 if let Some(scale) = set_band_scale {
-                    app.settings.band_scale = scale;
-                    app.settings.save();
-                    // Rebuild the audio pipeline so the analyzer picks up the new scaling.
-                    app.audio.set_band_scale(scale);
+                    app.apply_band_scale(scale);
                 }
 
                 // Persist the input trim (#84). The slider already set it live.
@@ -1544,8 +1514,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_input_trim")));
                 if let Some(db) = set_input_trim {
-                    app.settings.input_trim_db = db;
-                    app.settings.save();
+                    app.apply_input_trim(db);
                 }
 
                 // Persist the A/V sync offset (#80). The slider already set it live.
@@ -1554,8 +1523,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_sync_offset")));
                 if let Some(ms) = set_sync_offset {
-                    app.settings.sync_offset_ms = ms;
-                    app.settings.save();
+                    app.apply_sync_offset(ms);
                 }
 
                 // Handle auto-reconnect toggle from settings panel (A9 #1460)
@@ -1678,9 +1646,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("structure_tuning_dirty")));
                 if tuning_dirty == Some(true) {
-                    app.settings.structure_tuning =
-                        *app.audio.tuning().lock().unwrap_or_else(|e| e.into_inner());
-                    app.settings.save();
+                    app.persist_structure_tuning();
                 }
 
                 // Persist the A7 tempo prior after a slider release / preset pick (#1458). Same
@@ -1743,18 +1709,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("switch_audio_device")));
                 if let Some(device_str) = switch_audio {
-                    let device_name = if device_str.is_empty() {
-                        None
-                    } else {
-                        Some(device_str.as_str())
-                    };
-                    app.audio.switch_device(device_name);
-                    app.settings.audio_device = if device_str.is_empty() {
-                        None
-                    } else {
-                        Some(device_str)
-                    };
-                    app.settings.save();
+                    app.apply_audio_device((!device_str.is_empty()).then_some(device_str));
                 }
 
                 // Handle Ableton Link signals from UI

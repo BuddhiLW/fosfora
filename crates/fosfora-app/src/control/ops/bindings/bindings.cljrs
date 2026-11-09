@@ -1,3 +1,145 @@
 (ns fosfora.bindings
-  "Bindings and mappings. Preloaded as `bind`."
-  (:require [fosfora :as f]))
+  "The Binding Matrix, the audio input and MIDI/OSC mappings. Preloaded as `bind`.
+  A binding is picked by index, by id (\"b_004\") or by a unique piece of its label.
+
+    (bind/ls)                                  ; every binding; (bind/ls :global)
+    (bind/sources \"kick\")                     ; matching sources, with live values
+    (bind/targets \"opacity\")
+    (bind/add! \"audio.kick\" \"layer.0.opacity\" :smoothing 0.3 :range [0.2 1.0])
+    (bind/update! \"b_004\" :curve \"ease_in\" :invert true)
+    (bind/enable! 2 false)
+    (bind/remove! \"kick -> layer.0.opacity\")
+    (bind/learn! \"b_004\")                     ; the next MIDI/OSC control becomes its source
+    (bind/template! \"Beat Sync\")              ; on the active layer
+    (bind/lfo :saw :beat 90)                   ; {:key \"lfo.saw.beat.90\" :label ...}
+    (bind/save! :global)
+    (bind/audio) (bind/device! \"USB\") (bind/trim! 3.0) (bind/sync-offset! 40)
+    (bind/tuning! :drop-loud-jump 0.05)
+    (bind/midi) (bind/midi-learn! :param \"speed\") (bind/osc-learn! :trigger :next-preset)"
+  (:require [fosfora :as f]
+            [clojure.string :as str]))
+
+(defn- kw [x] (if (keyword? x) (name x) x))
+
+(defn- opts->args [opts]
+  (into {} (map (fn [[k v]] [k (kw v)]) (apply hash-map opts))))
+
+(defn- pick [b]
+  (cond (integer? b) {:index b}
+        (str/starts-with? (str b) "b_") {:id (str b)}
+        :else {:name (str b)}))
+
+;; Binding Matrix
+
+(defn ls
+  "Every binding, or only those of `scope` (:preset or :global)."
+  ([] (f/op :bindings/list))
+  ([scope] (f/op :bindings/list {:scope (kw scope)})))
+
+(defn info [b] (f/op :bindings/get (pick b)))
+
+(defn sources
+  ([] (f/op :bindings/sources))
+  ([needle] (f/op :bindings/sources {:filter needle})))
+
+(defn targets
+  ([] (f/op :bindings/targets))
+  ([needle] (f/op :bindings/targets {:filter needle})))
+
+(defn add!
+  "Bind `source` to `target`. Options: :scope :name :enabled :curve :smoothing
+  :range [lo hi] :invert :transforms."
+  [source target & opts]
+  (f/op :bindings/add (merge (opts->args opts) {:source source :target target})))
+
+(defn update!
+  "Edit binding `b`. Options as add!, plus :source and :target."
+  [b & opts]
+  (f/op :bindings/update (merge (opts->args opts) (pick b))))
+
+(defn enable!
+  "Turn binding `b` on or off; toggles without `on?`."
+  ([b] (f/op :bindings/enable (pick b)))
+  ([b on?] (f/op :bindings/enable (assoc (pick b) :on (boolean on?)))))
+
+(defn remove! [b] (f/op :bindings/remove (pick b)))
+(defn duplicate! [b] (f/op :bindings/duplicate (pick b)))
+(defn learn! [b] (f/op :bindings/learn (pick b)))
+(defn stop-learn! [] (f/op :bindings/learn {:cancel true}))
+
+(defn templates [] (f/op :bindings/templates))
+
+(defn template!
+  "Apply template `t` (index or name) to the active layer, or to :layer n."
+  [t & opts]
+  (f/op :bindings/apply-template
+        (merge (opts->args opts) (if (integer? t) {:index t} {:name (str t)}))))
+
+(defn save!
+  "Write the :global bindings, or the loaded user preset's (:preset), now."
+  [scope]
+  (f/op :bindings/save {:scope (kw scope)}))
+
+(defn lfos [] (f/op :bindings/lfos))
+
+(defn lfo
+  "The LFO source for `shape` (:sine :triangle :saw :square :sh), `division`
+  (:4bar :2bar :bar :half :beat :8th :16th) and a phase offset in degrees."
+  ([shape division] (lfo shape division 0))
+  ([shape division degrees]
+   (f/op :bindings/lfos {:shape (kw shape) :division (kw division) :degrees degrees})))
+
+;; Audio input
+
+(defn audio [] (f/op :bindings/audio))
+
+(defn device!
+  "Listen to input `d` (index or name), or the default input with nil."
+  [d]
+  (f/op :bindings/audio-device
+        (cond (nil? d) {:default true}
+              (integer? d) {:index d}
+              :else {:name (str d)})))
+
+(defn trim [] (f/op :bindings/input-trim))
+(defn trim! [db] (f/op :bindings/input-trim {:db (double db)}))
+(defn band-scale [] (f/op :bindings/band-scale))
+(defn band-scale! [s] (f/op :bindings/band-scale {:scale (kw s)}))
+(defn sync-offset [] (f/op :bindings/sync-offset))
+(defn sync-offset! [ms] (f/op :bindings/sync-offset {:ms (double ms)}))
+(defn tuning [] (f/op :bindings/structure-tuning))
+(defn tuning! [& opts] (f/op :bindings/structure-tuning (opts->args opts)))
+(defn reset-tuning! [] (f/op :bindings/structure-tuning {:reset true}))
+
+;; MIDI and OSC mappings
+
+(defn- mapping-target [kind target] {(keyword (kw kind)) (kw target)})
+
+(defn midi [] (f/op :bindings/midi))
+
+(defn midi-connect!
+  "Open MIDI port `p` (index or name)."
+  [p]
+  (f/op :bindings/midi-connect (if (integer? p) {:index p} {:name (str p)})))
+
+(defn midi-disconnect! [] (f/op :bindings/midi-connect {:disconnect true}))
+(defn midi-enable! [on?] (f/op :bindings/midi-enable {:on (boolean on?)}))
+
+(defn midi-learn!
+  "Map the next MIDI control: (midi-learn! :param \"speed\") or (midi-learn! :trigger :next-preset)."
+  [kind target]
+  (f/op :bindings/midi-learn (mapping-target kind target)))
+
+(defn midi-stop-learn! [] (f/op :bindings/midi-learn {:cancel true}))
+(defn midi-clear! [kind target] (f/op :bindings/midi-clear (mapping-target kind target)))
+
+(defn osc [] (f/op :bindings/osc))
+(defn osc-enable! [on?] (f/op :bindings/osc-enable {:on (boolean on?)}))
+
+(defn osc-learn!
+  "Map the next OSC address: (osc-learn! :param \"speed\") or (osc-learn! :trigger :next-preset)."
+  [kind target]
+  (f/op :bindings/osc-learn (mapping-target kind target)))
+
+(defn osc-stop-learn! [] (f/op :bindings/osc-learn {:cancel true}))
+(defn osc-clear! [kind target] (f/op :bindings/osc-clear (mapping-target kind target)))
