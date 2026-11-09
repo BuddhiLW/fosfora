@@ -147,7 +147,19 @@ fn assemble(
             })
             .collect();
         (0..views.len())
-            .map(|i| build_bind_groups(&views, i, device, ubuf, placeholder, audio, None, None))
+            .map(|i| {
+                build_bind_groups(
+                    &views,
+                    i,
+                    device,
+                    ubuf,
+                    placeholder,
+                    audio,
+                    None,
+                    None,
+                    None,
+                )
+            })
             .collect()
     };
     let passes = prepared
@@ -166,6 +178,7 @@ fn assemble(
     PassExecutor {
         passes,
         particle_system: None,
+        svg_offset: None,
         backdrop: None,
         flip_parity: 0,
     }
