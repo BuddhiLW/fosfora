@@ -99,6 +99,7 @@ pub struct ShellState<'a> {
     pub obstacle_info: Option<super::panels::obstacle_panel::ObstacleInfo>,
     pub lattice_info: Option<super::panels::lattice_panel::LatticeInfo>,
     pub helix_info: Option<super::panels::helix_panel::HelixInfo>,
+    pub svg_offset_info: Option<super::panels::svg_offset_panel::SvgOffsetInfo>,
     pub status_error: &'a Option<(String, std::time::Instant)>,
     pub settings: &'a SettingsConfig,
     /// The layer rows' pictures (#3123). `None` where there is no GPU: the
@@ -859,6 +860,11 @@ fn effect_sections(ui: &mut egui::Ui, s: &ShellState<'_>, layer: &crate::gpu::la
     if let Some(h) = &s.helix_info {
         widgets::section(ui, "v2_helix", "Helix (audio ribbon)", None, true, |ui| {
             helix_panel::draw_helix_panel(ui, h);
+        });
+    }
+    if let Some(svg) = &s.svg_offset_info {
+        widgets::section(ui, "v2_svg_offset", "SVG Offset", None, true, |ui| {
+            super::panels::svg_offset_panel::draw_svg_offset_panel(ui, svg);
         });
     }
     let mappings = layer

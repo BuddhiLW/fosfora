@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ParamDef {
+    /// Discrete scalar. Runtime scalar storage and the GPU ABI remain f32;
+    /// editors and control mappings round/clamp to these integer bounds.
+    Int { name: String, default: i32, min: i32, max: i32 },
     Float {
         name: String,
         default: f32,
@@ -28,7 +31,7 @@ pub enum ParamDef {
 impl ParamDef {
     pub fn name(&self) -> &str {
         match self {
-            ParamDef::Float { name, .. } => name,
+            ParamDef::Int { name, .. } | ParamDef::Float { name, .. } => name,
             ParamDef::Color { name, .. } => name,
             ParamDef::Bool { name, .. } => name,
             ParamDef::Point2D { name, .. } => name,
@@ -37,6 +40,7 @@ impl ParamDef {
 
     pub fn default_value(&self) -> ParamValue {
         match self {
+            ParamDef::Int { default, .. } => ParamValue::Float(*default as f32),
             ParamDef::Float { default, .. } => ParamValue::Float(*default),
             ParamDef::Color { default, .. } => ParamValue::Color(*default),
             ParamDef::Bool { default, .. } => ParamValue::Bool(*default),
@@ -47,6 +51,7 @@ impl ParamDef {
     /// Update the default value from a ParamValue. Type must match (ignored otherwise).
     pub fn set_default(&mut self, value: &ParamValue) {
         match (self, value) {
+            (ParamDef::Int { default, min, max, .. }, ParamValue::Float(v)) => *default = (*v as i32).clamp(*min, *max),
             (ParamDef::Float { default, .. }, ParamValue::Float(v)) => *default = *v,
             (ParamDef::Color { default, .. }, ParamValue::Color(v)) => *default = *v,
             (ParamDef::Bool { default, .. }, ParamValue::Bool(v)) => *default = *v,

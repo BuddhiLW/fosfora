@@ -346,6 +346,12 @@ fn build_params(store: &ParamStore) -> Vec<ParamInfo> {
                         live: modulated.map(|m| normalized(Some(m))),
                     }
                 }
+                ParamDef::Int { name, min, max, .. } => {
+                    let normalized = |v: Option<&ParamValue>| match v {
+                        Some(ParamValue::Float(f)) => f64::from((*f-*min as f32)/(*max-*min).max(1) as f32), _ => 0.0,
+                    };
+                    ParamInfo { name: name.clone(), param_type: "float", value: normalized(value), min: Some(f64::from(*min)), max: Some(f64::from(*max)), live: modulated.map(|v| normalized(Some(v))) }
+                }
                 ParamDef::Bool { name, .. } => {
                     let on = |v: Option<&ParamValue>| -> f64 {
                         match v {

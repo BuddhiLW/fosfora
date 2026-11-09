@@ -242,6 +242,9 @@ pub struct PfxEffect {
     /// GPU particle system definition.
     #[serde(default)]
     pub particles: Option<ParticleDef>,
+    /// Native cached SVG distance-field renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub svg_offset: Option<crate::gpu::svg_offset::SvgOffsetSettings>,
     /// Audio feature → visual target mappings (read-only display in UI).
     #[serde(default)]
     pub audio_mappings: Vec<AudioMapping>,
@@ -409,6 +412,7 @@ mod tests {
             passes: vec![],
             postprocess: None,
             particles: None,
+            svg_offset: None,
             audio_mappings: vec![],
             hidden: false,
             category: default_category(),
@@ -437,6 +441,7 @@ mod tests {
             passes: vec![],
             postprocess: None,
             particles: None,
+            svg_offset: None,
             audio_mappings: vec![],
             hidden: false,
             category: default_category(),
@@ -469,6 +474,7 @@ mod tests {
             passes: vec![pass],
             postprocess: None,
             particles: None,
+            svg_offset: None,
             audio_mappings: vec![],
             hidden: false,
             category: default_category(),
@@ -662,6 +668,7 @@ mod tests {
             passes: vec![],
             postprocess: None,
             particles: None,
+            svg_offset: None,
             audio_mappings: vec![],
             hidden: false,
             category: default_category(),

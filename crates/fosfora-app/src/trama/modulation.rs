@@ -346,7 +346,7 @@ fn locate_float(params: &ParamStore, name: &str) -> Option<(u8, f32, f32, f32)> 
 /// Scalar slots a def occupies in the packed buffer.
 fn def_width(def: &ParamDef) -> usize {
     match def {
-        ParamDef::Float { .. } | ParamDef::Bool { .. } => 1,
+        ParamDef::Float { .. } | ParamDef::Int { .. } | ParamDef::Bool { .. } => 1,
         ParamDef::Point2D { .. } => 2,
         ParamDef::Color { .. } => 4,
     }

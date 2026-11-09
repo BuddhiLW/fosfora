@@ -86,6 +86,7 @@ impl ParamStore {
             log::warn!("Ignoring non-finite value for param '{name}': {value:?}");
             return;
         }
+        let value = self.discrete_value(name, value);
         self.values.insert(name.to_string(), value);
         self.changed = true;
     }
@@ -100,6 +101,7 @@ impl ParamStore {
             log::warn!("Ignoring non-finite modulated value for param '{name}': {value:?}");
             return;
         }
+        let value = self.discrete_value(name, value);
         match self.modulated.get_mut(name) {
             Some(slot) => *slot = Some(value),
             None => {
@@ -130,6 +132,13 @@ impl ParamStore {
     /// param, the base value otherwise.
     pub fn effective(&self, name: &str) -> Option<&ParamValue> {
         self.modulated(name).or_else(|| self.values.get(name))
+    }
+
+    fn discrete_value(&self, name: &str, value: ParamValue) -> ParamValue {
+        match (self.defs.iter().find(|d| d.name() == name), value) {
+            (Some(ParamDef::Int { min, max, .. }), ParamValue::Float(v)) => ParamValue::Float(v.round().clamp(*min as f32, *max as f32)),
+            (_, value) => value,
+        }
     }
 
     pub fn reset(&mut self, name: &str) {

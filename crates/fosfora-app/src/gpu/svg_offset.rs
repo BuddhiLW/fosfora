@@ -321,6 +321,7 @@ impl SvgOffsetSim {
             wgpu::BindGroupEntry { binding: 2, resource: field.metadata.as_entire_binding() },
         ]})
     }
+    pub fn output_size(&self) -> [u32; 2] { self.size }
     pub fn sdf(&self) -> (&wgpu::TextureView, &wgpu::Sampler) { (&self.field.view, &self.sampler) }
     pub fn shape_count(&self) -> usize { self.document.shape_count() }
 
@@ -360,6 +361,30 @@ impl SvgOffsetSim {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn param_defaults_and_old_presets() {
+        let effect: crate::effect::format::PfxEffect = serde_json::from_str(include_str!("../../../../assets/effects/svg_offset.pfx")).unwrap();
+        assert_eq!(effect.category, "pattern");
+        assert!(effect.svg_offset.is_some());
+        let mut store = crate::params::ParamStore::new();
+        store.load_from_defs(&effect.inputs);
+        let mut packed = store.pack_to_buffer();
+        assert_eq!(&packed[..13], &[12.0,0.32,1.0,0.15,0.0,0.0,1.0,0.0,0.35,1.0,0.035,0.0,1.0]);
+        let slots = crate::effect::rates::layout(&effect.inputs, &effect.rates).unwrap();
+        assert_eq!(slots.iter().map(|s| s.dst).collect::<Vec<_>>(), [13,14]);
+        for name in ["mode", "color_mode", "order"] {
+            assert!(effect.inputs.iter().any(|d| matches!(d, crate::params::ParamDef::Int { name: n, .. } if n == name)));
+        }
+        store.set("mode", crate::params::ParamValue::Float(0.7));
+        packed = store.pack_to_buffer(); assert_eq!(packed[5],1.0);
+        let old: crate::preset::LayerPreset = serde_json::from_str(r#"{"effect_name":"SVG Offset"}"#).unwrap();
+        assert!(old.svg_offset_path.is_none());
+        let mut saved = old; saved.svg_offset_path = Some("/tmp/art.svg".into());
+        saved.svg_offset_settings = Some(SvgOffsetSettings { quality: 2, ..Default::default() });
+        let restored: crate::preset::LayerPreset = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(restored.svg_offset_path, saved.svg_offset_path);
+        assert_eq!(restored.svg_offset_settings, saved.svg_offset_settings);
+    }
     #[test]
     fn shaders_validate() {
         for source in [include_str!("../../../../assets/shaders/builtin/svg_offset_field.wgsl").to_string(),

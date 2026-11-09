@@ -6,6 +6,7 @@ pub struct PlaceholderTexture {
     texture: Texture,
     pub view: TextureView,
     pub sampler: Sampler,
+    pub nearest_sampler: Sampler,
 }
 
 impl PlaceholderTexture {
@@ -58,6 +59,7 @@ impl PlaceholderTexture {
             texture,
             view,
             sampler,
+            nearest_sampler: device.create_sampler(&wgpu::SamplerDescriptor::default()),
         }
     }
 }

@@ -26,11 +26,11 @@ fn fs_main(@builtin(position) position: vec4f, @location(0) uv: vec2f) -> @locat
     let f = textureLoad(sdf, vec2i(q*u.geometry.xy), 0);
     let id = u32(f.y);
     if id == 0u || id >= arrayLength(&shapes) { return bg; }
-    let meta = shapes[id];
-    var order = length((meta.geometry.xy-0.5)*vec2f(u.transform.w, 1.0));
+    let shape = shapes[id];
+    var order = length((shape.geometry.xy-0.5)*vec2f(u.transform.w, 1.0));
     switch i32(p(7u)) {
-        case 1: { order = meta.geometry.y; }
-        case 2: { order = hash(meta.geometry.z); }
+        case 1: { order = shape.geometry.y; }
+        case 2: { order = hash(shape.geometry.z); }
         case 3: { order = hash(f32(id)); }
         default: {}
     }
@@ -54,10 +54,10 @@ fn fs_main(@builtin(position) position: vec4f, @location(0) uv: vec2f) -> @locat
     switch i32(p(6u)) {
         case 0: { color = vec3f(0.3+0.7*fract(distance*amount/4.0+motion)); }
         case 1: { color = hsv(order+distance*0.7+p(14u)+p(11u)); }
-        case 3: { color = meta.color.rgb; }
+        case 3: { color = shape.color.rgb; }
         default: {}
     }
-    alpha = clamp(alpha*meta.color.a,0.0,1.0);
+    alpha = clamp(alpha*shape.color.a,0.0,1.0);
     let rgb = color*max(0.0,p(9u))*alpha;
     return vec4f(rgb+bg.rgb*(1.0-alpha), alpha+bg.a*(1.0-alpha));
 }
