@@ -41,6 +41,12 @@ pub fn read(ctx: &egui::Context) -> Option<OutputWindowInfo> {
     ctx.data_mut(|d| d.get_temp::<OutputWindowInfo>(data_id()))
 }
 
+/// Ask the frame loop to open the output window on display `index` (the
+/// "Send output here" button, and the `system/output-window` op).
+pub fn request_open(ctx: &egui::Context, index: usize) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("request_output_window"), index));
+}
+
 /// Requests this control leaves behind, read once per frame in `main.rs`.
 pub fn take_open_request(ctx: &egui::Context) -> Option<usize> {
     ctx.data_mut(|d| d.remove_temp(egui::Id::new("request_output_window")))
@@ -114,8 +120,6 @@ pub fn draw(ui: &mut Ui, info: &OutputWindowInfo) {
         )
         .clicked()
     {
-        ui.ctx().data_mut(|d| {
-            d.insert_temp(egui::Id::new("request_output_window"), index);
-        });
+        request_open(ui.ctx(), index);
     }
 }

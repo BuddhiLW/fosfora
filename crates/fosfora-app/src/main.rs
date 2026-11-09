@@ -38,7 +38,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Icon, Window, WindowAttributes, WindowId};
+use winit::window::{Icon, Window, WindowAttributes, WindowId};
 
 use app::App;
 use effect::loader::EffectLoader;
@@ -270,52 +270,12 @@ impl ApplicationHandler for FosforaApp {
                     return;
                 }
                 match key {
+                    // The Escape ladder (bind, matrix, interface, tour, chain
+                    // editor, output window, quit): `App::escape`, op `system/escape`.
                     KeyCode::Escape => {
-                        // Cancel a half-finished click-to-bind, then close the
-                        // binding matrix, then bring the interface back, then
-                        // the shader editor, then quit.
-                        //
-                        // "Bring the interface back" is why Escape is not the
-                        // first step to quitting any more: the shell's Full
-                        // output button hides every panel, and the way back was
-                        // D — which nothing on screen says once the panels are
-                        // gone. Escape is the key people press to get out of a
-                        // full-screen view, and pressing it offered to quit.
-                        //
-                        // The second output window is on that ladder for the
-                        // same reason. Escape closes it from the window itself,
-                        // but the pointer is usually over the main window when
-                        // someone wants it gone, and there it offered to quit
-                        // instead.
-                        //
-                        // The workspace's chain editor modal comes before it,
-                        // as the binding matrix's does.
-                        if app.binding_matrix.open && app.binding_matrix.armed.is_some() {
-                            app.binding_matrix.armed = None;
-                        } else if app.binding_matrix.open {
-                            app.binding_matrix.open = false;
-                        } else if !app.egui_overlay.visible {
-                            app.egui_overlay.toggle_visible();
-                        } else if crate::ui::tour::current(&app.egui_overlay.context()).is_some()
-                        {
-                            // The tour sees the same Escape in its own frame
-                            // and ends itself; here it only must not quit.
-                        } else if app.trama.canvas_open {
-                            app.trama.canvas_open = false;
-                        } else if app.output_window.is_some() {
-                            app.close_output_window();
-                        } else if !app.shader_editor.open {
-                            app.quit_requested = true;
-                        }
+                        app.escape();
                     }
-                    KeyCode::KeyF => {
-                        let window = &app.window;
-                        if window.fullscreen().is_some() {
-                            window.set_fullscreen(None);
-                        } else {
-                            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-                        }
-                    }
+                    KeyCode::KeyF => app.toggle_fullscreen(),
                     KeyCode::KeyD => {
                         app.egui_overlay.toggle_visible();
                     }
@@ -335,39 +295,19 @@ impl ApplicationHandler for FosforaApp {
                         }
                     KeyCode::KeyB
                         if !app.shader_editor.open => {
-                            app.binding_matrix.open = !app.binding_matrix.open;
-                            // One modal at a time.
-                            if app.binding_matrix.open {
-                                app.trama.canvas_open = false;
-                            }
+                            app.set_binding_matrix_open(!app.binding_matrix.open);
                         }
                     // The chain editor: C for chain, the word the interface
                     // uses (it was G before v2).
                     KeyCode::KeyC
                         if !app.shader_editor.open => {
-                            app.trama.canvas_open = !app.trama.canvas_open;
-                            if app.trama.canvas_open {
-                                app.binding_matrix.open = false;
-                            }
+                            app.set_chain_editor_open(!app.trama.canvas_open);
                         }
                     KeyCode::BracketLeft => {
-                        // Previous layer
-                        let num = app.layer_stack.layers.len();
-                        if num > 1 {
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer =
-                                if current == 0 { num - 1 } else { current - 1 };
-                            app.sync_active_layer();
-                        }
+                        app.run_trigger(crate::midi::types::TriggerAction::PrevLayer);
                     }
                     KeyCode::BracketRight => {
-                        // Next layer
-                        let num = app.layer_stack.layers.len();
-                        if num > 1 {
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer = (current + 1) % num;
-                            app.sync_active_layer();
-                        }
+                        app.run_trigger(crate::midi::types::TriggerAction::NextLayer);
                     }
                     _ => {}
                 }
@@ -1302,10 +1242,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("confirm_quit")));
                 if confirm_quit.is_some() {
-                    app.gpu.save_pipeline_cache();
-                    // Flush any global binding edit still inside the 1s debounce
-                    // window so it isn't lost on quit.
-                    app.binding_bus.flush();
+                    app.prepare_quit();
                     event_loop.exit();
                 }
 
@@ -1470,12 +1407,7 @@ impl ApplicationHandler for FosforaApp {
                         custom::publish(&app.egui_overlay.context(), &app.custom_themes);
                     }
                     if let Some(theme) = pick {
-                        app.egui_overlay
-                            .set_palette(theme.palette(&app.custom_themes));
-                        if theme != app.settings.theme {
-                            app.settings.theme = theme;
-                            app.settings.save();
-                        }
+                        app.apply_theme(theme);
                     }
                 }
 
@@ -1485,8 +1417,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_output_alpha")));
                 if let Some(mode) = set_output_alpha {
-                    app.settings.output_alpha = mode;
-                    app.settings.save();
+                    app.set_output_alpha(mode);
                 }
 
                 // Handle particle quality change from settings panel (reloads the
@@ -1532,9 +1463,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_auto_reconnect")));
                 if let Some(on) = set_auto_reconnect {
-                    app.settings.auto_reconnect = on;
-                    app.settings.save();
-                    app.audio.set_auto_reconnect(on);
+                    app.set_auto_reconnect(on);
                 }
 
                 // "Full output" in the shell's top bar hides the interface, the
@@ -1634,8 +1563,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_flash_limit")));
                 if let Some(limit) = set_flash_limit {
-                    app.settings.flash_limit = limit;
-                    app.settings.save();
+                    app.set_flash_limit(limit);
                 }
 
                 // Persist A18 structure tuning after a slider release (#1510). The live value
@@ -1657,13 +1585,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("tempo_config_dirty")));
                 if tempo_dirty == Some(true) {
-                    app.settings.tempo = app
-                        .audio
-                        .tempo()
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .config;
-                    app.settings.save();
+                    app.save_tempo_config();
                 }
 
                 // Handle FFmpeg webcam toggle from settings panel
@@ -1750,13 +1672,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_set_enabled")));
                     if let Some(enabled) = ndi_enable {
-                        app.ndi.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_ndi_enabled(enabled);
                     }
 
                     let ndi_source: Option<String> = app
@@ -1764,14 +1680,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_source_name")));
                     if let Some(name) = ndi_source {
-                        app.ndi.config.source_name = name;
-                        app.ndi.config.save();
-                        app.ndi.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_ndi(|c| c.source_name = name);
                     }
 
                     let ndi_res: Option<u8> = app
@@ -1783,14 +1692,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::ndi::types::OutputResolution::Match);
-                        app.ndi.config.resolution = res;
-                        app.ndi.config.save();
-                        app.ndi.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_ndi(|c| c.resolution = res);
                     }
 
                     let ndi_alpha_luma: Option<bool> = app
@@ -1798,8 +1700,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_alpha_from_luma")));
                     if let Some(val) = ndi_alpha_luma {
-                        app.ndi.config.alpha_from_luma = val;
-                        app.ndi.config.save();
+                        app.configure_ndi(|c| c.alpha_from_luma = val);
                     }
                 }
 
@@ -1811,13 +1712,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("v4l2_set_enabled")));
                     if let Some(enabled) = v4l2_enable {
-                        app.v4l2.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_v4l2_enabled(enabled);
                     }
 
                     let v4l2_device: Option<Option<String>> = app
@@ -1825,14 +1720,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("v4l2_device_path")));
                     if let Some(path) = v4l2_device {
-                        app.v4l2.config.device_path = path;
-                        app.v4l2.config.save();
-                        app.v4l2.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_v4l2(|c| c.device_path = path);
                     }
 
                     let v4l2_res: Option<u8> = app
@@ -1844,14 +1732,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::v4l2::types::OutputResolution::Match);
-                        app.v4l2.config.resolution = res;
-                        app.v4l2.config.save();
-                        app.v4l2.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_v4l2(|c| c.resolution = res);
                     }
 
                     let v4l2_fmt: Option<u8> = app
@@ -1863,14 +1744,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(fmt_u8 as usize)
                             .copied()
                             .unwrap_or_default();
-                        app.v4l2.config.pixel_format = fmt;
-                        app.v4l2.config.save();
-                        app.v4l2.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_v4l2(|c| c.pixel_format = fmt);
                     }
 
                     let v4l2_refresh: Option<bool> = app
@@ -1890,13 +1764,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("spout_set_enabled")));
                     if let Some(enabled) = spout_enable {
-                        app.spout.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_spout_enabled(enabled);
                     }
 
                     let spout_name: Option<String> = app
@@ -1904,14 +1772,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("spout_sender_name")));
                     if let Some(name) = spout_name {
-                        app.spout.config.sender_name = name;
-                        app.spout.config.save();
-                        app.spout.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_spout(|c| c.sender_name = name);
                     }
 
                     let spout_res: Option<u8> = app
@@ -1923,14 +1784,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::spout::types::OutputResolution::Match);
-                        app.spout.config.resolution = res;
-                        app.spout.config.save();
-                        app.spout.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_spout(|c| c.resolution = res);
                     }
                 }
 
@@ -1942,13 +1796,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("syphon_set_enabled")));
                     if let Some(enabled) = syphon_enable {
-                        app.syphon.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_syphon_enabled(enabled);
                     }
 
                     let syphon_name: Option<String> = app
@@ -1956,14 +1804,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("syphon_server_name")));
                     if let Some(name) = syphon_name {
-                        app.syphon.config.server_name = name;
-                        app.syphon.config.save();
-                        app.syphon.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_syphon(|c| c.server_name = name);
                     }
 
                     let syphon_res: Option<u8> = app
@@ -1975,14 +1816,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::syphon::types::OutputResolution::Match);
-                        app.syphon.config.resolution = res;
-                        app.syphon.config.save();
-                        app.syphon.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_syphon(|c| c.resolution = res);
                     }
                 }
 
@@ -1993,31 +1827,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("recording_toggle")));
                     if rec_toggle.is_some() {
-                        if app.recording.is_recording() {
-                            app.recording.stop();
-                        } else {
-                            let audio_source = if app.audio.active {
-                                Some(crate::recording::encoder::AudioSource {
-                                    ring: app.audio.recording_ring.clone(),
-                                    sample_rate: app.audio.recording_rate,
-                                })
-                            } else {
-                                None
-                            };
-                            if let Err(e) = app.recording.start(
-                                &app.gpu.device,
-                                app.gpu.format,
-                                app.render_size().0,
-                                app.render_size().1,
-                                audio_source,
-                            ) {
-                                log::error!("Failed to start recording: {e}");
-                                app.status_error = Some((
-                                    format!("Recording failed to start: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                            }
-                        }
+                        app.toggle_recording();
                     }
 
                     let rec_codec: Option<u8> = app
@@ -2028,8 +1838,7 @@ impl ApplicationHandler for FosforaApp {
                         if let Some(&codec) =
                             crate::recording::types::VideoCodec::ALL.get(idx as usize)
                         {
-                            app.recording.config.codec = codec;
-                            app.recording.config.save();
+                            app.configure_recording(|c| c.codec = codec);
                         }
                     }
 
@@ -2041,8 +1850,7 @@ impl ApplicationHandler for FosforaApp {
                         if let Some(&res) =
                             crate::gpu::types::OutputResolution::ALL.get(idx as usize)
                         {
-                            app.recording.config.resolution = res;
-                            app.recording.config.save();
+                            app.configure_recording(|c| c.resolution = res);
                         }
                     }
 
@@ -2051,8 +1859,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_fps_change")));
                     if let Some(fps) = rec_fps {
-                        app.recording.config.fps = fps;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.fps = fps);
                     }
 
                     let rec_quality: Option<u32> = app
@@ -2060,8 +1867,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_quality_change")));
                     if let Some(q) = rec_quality {
-                        app.recording.config.quality = q;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.quality = q);
                     }
 
                     let rec_container: Option<u8> = app
@@ -2072,8 +1878,7 @@ impl ApplicationHandler for FosforaApp {
                         if let Some(&cont) =
                             crate::recording::types::Container::ALL.get(idx as usize)
                         {
-                            app.recording.config.container = cont;
-                            app.recording.config.save();
+                            app.configure_recording(|c| c.container = cont);
                         }
                     }
 
@@ -2082,8 +1887,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_hw_toggle")));
                     if let Some(hw) = rec_hw {
-                        app.recording.config.use_hw_encoder = hw;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.use_hw_encoder = hw);
                     }
 
                     let rec_audio: Option<bool> = app
@@ -2091,8 +1895,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_audio_toggle")));
                     if let Some(val) = rec_audio {
-                        app.recording.config.record_audio = val;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.record_audio = val);
                     }
                 }
 
@@ -3499,96 +3302,7 @@ impl ApplicationHandler for FosforaApp {
                 triggers.append(&mut app.pending_osc_triggers);
                 triggers.append(&mut app.pending_web_triggers);
                 for trigger in triggers {
-                    use crate::midi::types::TriggerAction;
-                    // Build visible (non-hidden) effect indices for cycling
-                    let visible: Vec<usize> = app
-                        .effect_loader
-                        .effects
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, e)| !e.hidden)
-                        .map(|(i, _)| i)
-                        .collect();
-                    match trigger {
-                        TriggerAction::NextEffect if !visible.is_empty() => {
-                            let current = app
-                                .layer_stack
-                                .active()
-                                .and_then(|l| l.effect_index())
-                                .unwrap_or(0);
-                            let pos = visible.iter().position(|&i| i == current).unwrap_or(0);
-                            app.load_effect(visible[(pos + 1) % visible.len()]);
-                        }
-                        TriggerAction::PrevEffect if !visible.is_empty() => {
-                            let current = app
-                                .layer_stack
-                                .active()
-                                .and_then(|l| l.effect_index())
-                                .unwrap_or(0);
-                            let pos = visible.iter().position(|&i| i == current).unwrap_or(0);
-                            app.load_effect(
-                                visible[if pos == 0 { visible.len() - 1 } else { pos - 1 }],
-                            );
-                        }
-                        TriggerAction::TogglePostProcess => {
-                            app.post_process.enabled = !app.post_process.enabled;
-                            app.master_postprocess.enabled = app.post_process.enabled;
-                        }
-                        TriggerAction::ToggleOverlay => {
-                            app.egui_overlay.toggle_visible();
-                        }
-                        TriggerAction::NextPreset if !app.preset_store.presets.is_empty() => {
-                            let num = app.preset_store.presets.len();
-                            let current = app.target_preset().unwrap_or(0);
-                            app.switch_preset((current + 1) % num);
-                        }
-                        TriggerAction::PrevPreset if !app.preset_store.presets.is_empty() => {
-                            let num = app.preset_store.presets.len();
-                            let current = app.target_preset().unwrap_or(0);
-                            app.switch_preset(if current == 0 { num - 1 } else { current - 1 });
-                        }
-                        TriggerAction::NextLayer if app.layer_stack.layers.len() > 1 => {
-                            let num = app.layer_stack.layers.len();
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer = (current + 1) % num;
-                            app.sync_active_layer();
-                        }
-                        TriggerAction::PrevLayer if app.layer_stack.layers.len() > 1 => {
-                            let num = app.layer_stack.layers.len();
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer =
-                                if current == 0 { num - 1 } else { current - 1 };
-                            app.sync_active_layer();
-                        }
-                        TriggerAction::SceneGoNext => {
-                            let event = app.timeline.go_next();
-                            app.process_timeline_event(event);
-                        }
-                        TriggerAction::SceneGoPrev => {
-                            let event = app.timeline.go_prev();
-                            app.process_timeline_event(event);
-                        }
-                        TriggerAction::TempoHalf => {
-                            app.audio
-                                .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(-1));
-                        }
-                        TriggerAction::TempoDouble => {
-                            app.audio
-                                .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(1));
-                        }
-                        TriggerAction::TempoTap => {
-                            app.audio.tap_tempo();
-                        }
-                        TriggerAction::ToggleTimeline => {
-                            if app.timeline.active {
-                                app.timeline.stop();
-                            } else if !app.timeline.cues.is_empty() {
-                                let event = app.timeline.start(0);
-                                app.process_timeline_event(event);
-                            }
-                        }
-                        _ => {}
-                    }
+                    app.run_trigger(trigger);
                 }
 
                 match app.render() {
