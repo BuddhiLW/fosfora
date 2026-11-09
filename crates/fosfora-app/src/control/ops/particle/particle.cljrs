@@ -1,0 +1,3 @@
+(ns fosfora.particle
+  "Particles, lattice, helix, obstacles, morph, splats. Preloaded as `particle`."
+  (:require [fosfora :as f]))

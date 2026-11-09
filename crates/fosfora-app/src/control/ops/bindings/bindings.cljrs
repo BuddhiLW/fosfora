@@ -1,0 +1,3 @@
+(ns fosfora.bindings
+  "Bindings and mappings. Preloaded as `bind`."
+  (:require [fosfora :as f]))

@@ -1,0 +1,3 @@
+(ns fosfora.trama
+  "Effect chains and trama graphs. Preloaded as `trama`."
+  (:require [fosfora :as f]))

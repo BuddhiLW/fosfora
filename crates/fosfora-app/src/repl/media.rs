@@ -30,10 +30,18 @@ fn is_media(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
-        .is_some_and(|e| {
-            crate::media::decoder::VIDEO_EXTENSIONS.contains(&e.as_str())
-                || IMAGE_EXTENSIONS.contains(&e.as_str())
-        })
+        .is_some_and(|e| is_video_ext(&e) || IMAGE_EXTENSIONS.contains(&e.as_str()))
+}
+
+#[cfg(feature = "video")]
+fn is_video_ext(ext: &str) -> bool {
+    crate::media::decoder::VIDEO_EXTENSIONS.contains(&ext)
+}
+
+/// Without the `video` feature there is no decoder, so only images open.
+#[cfg(not(feature = "video"))]
+fn is_video_ext(_: &str) -> bool {
+    false
 }
 
 fn other(msg: String) -> ValueError {

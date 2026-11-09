@@ -22,6 +22,10 @@ pub mod analyze;
 pub mod app;
 pub mod audio;
 pub mod bindings;
+/// Every UI action as a named op (preset/save, scene/open, ...), callable from
+/// the embedded REPL and from addons.
+#[cfg(feature = "desktop")]
+pub mod control;
 /// Song-file decoding (`decode` feature; `analyze` implies it).
 #[cfg(feature = "decode")]
 #[path = "analyze/decode.rs"]

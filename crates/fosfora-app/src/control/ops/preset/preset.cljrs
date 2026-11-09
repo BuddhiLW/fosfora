@@ -1,0 +1,45 @@
+(ns fosfora.preset
+  "Presets, as the Presets panel handles them. Preloaded as `preset`:
+
+    (preset/ls)                     ; [{:index 0 :name \"...\" :builtin true :current false} ...]
+    (preset/save! \"Night Drive\")
+    (preset/load! \"night\")          ; by unique name substring, with the default transition
+    (preset/load! 3 :cut true)       ; by index, no transition
+    (preset/next!) (preset/prev!)
+    (preset/copy! \"Night Drive\" :as \"Night Drive B\")
+    (preset/delete! \"Night Drive B\")"
+  (:require [fosfora :as f]))
+
+(defn- target [p] (if (integer? p) {:index p} {:name (str p)}))
+
+(defn ls [] (f/op :preset/list))
+(defn current [] (f/op :preset/current))
+(defn save! [name] (f/op :preset/save {:name name}))
+
+(defn load!
+  "Load preset `p` (index or name). Options: :cut true for no transition."
+  [p & {:keys [cut]}]
+  (f/op :preset/load (assoc (target p) :cut (boolean cut))))
+
+(defn next! [& {:keys [cut]}] (f/op :preset/next {:cut (boolean cut)}))
+(defn prev! [& {:keys [cut]}] (f/op :preset/prev {:cut (boolean cut)}))
+(defn delete! [p] (f/op :preset/delete (target p)))
+
+(defn copy!
+  "Copy preset `p` to a new user preset and load it. Options: :as \"name\"."
+  [p & {:keys [as]}]
+  (f/op :preset/copy (cond-> (target p) as (assoc :as as))))
+
+(defn deselect! [] (f/op :preset/deselect))
+(defn new! [] (f/op :preset/new))
+(defn rescan! [] (f/op :preset/rescan))
+
+(defn transition!
+  "Read the default switch transition, or change parts of it:
+  (preset/transition! :kind :dissolve :secs 2.0 :keep-moving true)."
+  [& {:keys [kind secs keep-moving]}]
+  (f/op :preset/transition
+        (cond-> {}
+          kind (assoc :kind (name kind))
+          secs (assoc :secs (double secs))
+          (some? keep-moving) (assoc :keep-moving (boolean keep-moving)))))

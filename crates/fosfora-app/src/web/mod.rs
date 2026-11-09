@@ -45,6 +45,11 @@ pub struct WebSystem {
     local_rx: Receiver<WsInMessage>,
     /// Latest audio snapshot JSON, kept only while a local reader is attached.
     latest_audio: Arc<Mutex<String>>,
+    /// Control-op calls from in-process clients (the REPL), run by
+    /// `App::run_control_ops` on the render thread.
+    #[cfg_attr(not(feature = "repl"), allow(dead_code))]
+    control_queue: crate::control::OpQueue,
+    control_rx: Receiver<crate::control::OpCall>,
     #[cfg(feature = "repl")]
     repl: Option<crate::repl::Repl>,
 }
@@ -54,10 +59,13 @@ impl WebSystem {
     fn unconnected(config: WebConfig) -> Self {
         let (inbound_tx, inbound_rx) = crate::inbound::bounded(64);
         let (local_tx, local_rx) = crate::inbound::bounded(256);
+        let (control_queue, control_rx) = crate::control::OpQueue::new();
 
         Self {
             local_tx,
             local_rx,
+            control_queue,
+            control_rx,
             latest_audio: Arc::new(Mutex::new(String::new())),
             #[cfg(feature = "repl")]
             repl: None,
