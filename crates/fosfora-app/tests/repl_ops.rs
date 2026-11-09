@@ -227,3 +227,24 @@ fn a_preset_saved_over_nrepl_lists_and_deletes() {
     repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
     assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
 }
+
+#[test]
+fn a_preset_binding_added_over_nrepl_lists_and_removes() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Preset-scoped bindings reach disk only on a preset save, so this leaves no file behind.
+    let name = format!("it-repl-ops-{}", std::process::id());
+    let before = repl.eval("(count (bind/ls))").unwrap();
+    let add = format!(
+        "(:id (bind/add! \"lfo.sine.bar\" \"global.master_opacity\" :name \"{name}\" :range [0.9 1.0]))"
+    );
+    let id = repl.eval(&add).unwrap();
+    let listed = repl.eval(&format!("(:name (bind/info {id}))")).unwrap();
+    assert_eq!(listed, format!("\"{name}\""));
+    repl.eval(&format!("(bind/remove! {id})")).unwrap();
+    assert_eq!(repl.eval("(count (bind/ls))").unwrap(), before);
+    let e = repl.eval("(bind/add! \"audio.kick\" \"uniform.kik\")").unwrap_err();
+    assert!(e.contains("unknown target"), "{e}");
+}
