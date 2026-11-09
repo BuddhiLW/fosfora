@@ -1,3 +1,117 @@
 (ns fosfora.trama
-  "Effect chains and trama graphs. Preloaded as `trama`."
+  "Effect chains, as the chain editor edits them. Preloaded as `trama`.
+
+  Every fn takes `:chain` - :master, a layer index, or a layer name - and
+  defaults to the chain the editor is pointed at. Nodes are an id or a
+  name (an effect id like \"kaleido\", or output, layer-input, feedback, anchor).
+
+    (trama/chains)                         ; master + one row per layer
+    (trama/effects)                        ; installed effects, by id
+    (trama/open! :chain 0)                 ; editor on layer 0's chain
+    (def in (trama/add! :layer-input :chain 0))
+    (def k (trama/add! \"kaleido\" :chain 0 :pos [280 160]))
+    (trama/connect! (:id in) (:id k) :chain 0)
+    (trama/connect! (:id k) \"output\" :chain 0)
+    (trama/set-param! (:id k) :segments 8 :chain 0)
+    (trama/mod! (:id k) :spin :source :bass :amount 0.4 :chain 0)
+    (trama/bypass! (:id k) :chain 0)
+    (trama/graph :chain 0)                 ; nodes, wires, contributes?
+    (trama/export! \"~/kaleido.fio.json\" :chain 0)
+    (trama/import! :master :path \"~/kaleido.fio.json\")"
   (:require [fosfora :as f]))
+
+(defn- chain-arg [chain]
+  (cond
+    (nil? chain) {}
+    (keyword? chain) {:chain (name chain)}
+    :else {:chain chain}))
+
+(defn- node-arg [n] (if (integer? n) n (if (keyword? n) (name n) (str n))))
+
+(defn- op [k chain args] (f/op k (merge (chain-arg chain) args)))
+
+(defn chains [] (f/op :trama/chains))
+(defn graph [& {:keys [chain]}] (op :trama/graph chain {}))
+(defn doc [& {:keys [chain]}] (op :trama/doc chain {}))
+(defn node [n & {:keys [chain]}] (op :trama/node chain {:node (node-arg n)}))
+
+(defn effects
+  "Installed trama effects, failed files and effect dirs. (trama/effects :source)."
+  ([] (f/op :trama/effects))
+  ([kind] (f/op :trama/effects {:kind (name kind)})))
+
+(defn editor [] (f/op :trama/editor))
+(defn open! [& {:keys [chain]}] (op :trama/open chain {}))
+(defn close! [] (f/op :trama/close))
+
+(defn add!
+  "Place a node: an effect id/name, or :layer-input :feedback :anchor.
+  Options: :chain, :pos [x y]."
+  [what & {:keys [chain pos]}]
+  (op :trama/add chain
+      (cond-> (if (contains? #{:layer-input :feedback :anchor} what) {:kind (name what)} {:effect (node-arg what)})
+        pos (assoc :pos pos))))
+
+(defn remove! [n & {:keys [chain]}] (op :trama/remove chain {:node (node-arg n)}))
+
+(defn connect!
+  "Wire `from`'s output into `to`'s input pin (default 0)."
+  [from to & {:keys [chain input]}]
+  (op :trama/connect chain (cond-> {:from (node-arg from) :to (node-arg to)} input (assoc :input input))))
+
+(defn disconnect!
+  "Remove the wires into `to` (one pin with :input), or out of a node with :from."
+  [to & {:keys [chain input from]}]
+  (op :trama/disconnect chain
+      (cond-> {}
+        to (assoc :to (node-arg to))
+        input (assoc :input input)
+        from (assoc :from (node-arg from)))))
+
+(defn move! [n pos & {:keys [chain]}] (op :trama/move chain {:node (node-arg n) :pos pos}))
+
+(defn bypass!
+  "Toggle a node's bypass, or set it with :on true/false."
+  [n & {:keys [chain on]}]
+  (op :trama/bypass chain (cond-> {:node (node-arg n)} (some? on) (assoc :on (boolean on)))))
+
+(defn set-param!
+  "Set node `n`'s param: a number, bool, [x y] or [r g b a]."
+  [n param v & {:keys [chain]}]
+  (op :trama/set chain {:node (node-arg n) :param (node-arg param) :value v}))
+
+(defn reset-param! [n param & {:keys [chain]}]
+  (op :trama/set chain {:node (node-arg n) :param (node-arg param) :reset true}))
+
+(defn mod!
+  "Modulate a number param. Options change only what they name:
+  :source (:sine :saw :square :triangle :sample-hold :drift :rms :onset :bass
+  :mid :high :band3 :beat-phase :bpm), :amount -1..1, :mode (:add :multiply
+  :replace), :smoothing 0..1, :rate (Hz, or :beat :bar :half :eighth ...),
+  :phase 0..1."
+  [n param & {:keys [chain source amount mode smoothing rate phase]}]
+  (op :trama/mod chain
+      (cond-> {:node (node-arg n) :param (node-arg param)}
+        source (assoc :source (node-arg source))
+        amount (assoc :amount (double amount))
+        mode (assoc :mode (name mode))
+        smoothing (assoc :smoothing (double smoothing))
+        rate (assoc :rate (if (number? rate) (double rate) (name rate)))
+        phase (assoc :phase (double phase)))))
+
+(defn unmod! [n param & {:keys [chain]}]
+  (op :trama/mod chain {:node (node-arg n) :param (node-arg param) :off true}))
+
+(defn clear! [& {:keys [chain]}] (op :trama/clear chain {}))
+
+(defn seed!
+  "Give an empty chain the starter patch: layer input -> effect -> Output."
+  [& {:keys [chain effect]}]
+  (op :trama/seed chain (cond-> {} effect (assoc :effect (node-arg effect)))))
+
+(defn export! [path & {:keys [chain]}] (op :trama/export chain {:path path}))
+
+(defn import!
+  "Replace `chain` with a .fio.json file (:path) or a document (:doc, e.g. from trama/doc)."
+  [chain & {:keys [path doc]}]
+  (op :trama/import chain (cond-> {} path (assoc :path path) doc (assoc :doc doc))))

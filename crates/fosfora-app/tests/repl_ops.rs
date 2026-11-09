@@ -227,3 +227,20 @@ fn a_preset_saved_over_nrepl_lists_and_deletes() {
     repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
     assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
 }
+
+#[test]
+fn trama_chains_and_effects_read_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Reads only: the user's chains are left exactly as they are.
+    let first = repl.eval("(:chain (first (trama/chains)))").unwrap();
+    assert_eq!(first, "\"master\"");
+    let output = repl.eval("(:output (trama/graph :chain :master))").unwrap();
+    assert!(output.parse::<u64>().is_ok(), "{output}");
+    let dirs = repl.eval("(count (:dirs (trama/effects)))").unwrap();
+    assert_ne!(dirs, "0");
+    let e = repl.eval("(trama/remove! \"output\" :chain :master)").unwrap_err();
+    assert!(e.contains("Output"), "{e}");
+}
