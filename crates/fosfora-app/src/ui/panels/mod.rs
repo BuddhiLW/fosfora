@@ -4,9 +4,11 @@ pub mod audio_panel;
 pub mod binding_helpers;
 pub mod binding_matrix;
 pub mod bindings_panel;
+pub mod catalog_media;
 pub mod catalog_panel;
 pub mod cue_strip;
 pub mod helix_panel;
+pub mod svg_offset_panel;
 pub mod lattice_panel;
 pub mod layer_panel;
 #[cfg(feature = "link")]

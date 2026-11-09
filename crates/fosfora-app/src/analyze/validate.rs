@@ -159,7 +159,7 @@ fn check_param_value(where_: &str, def: &ParamDef, value: &ParamValue, report: &
         ParamValue::Point2D(_) => "Point2D",
     };
     let want = match def {
-        ParamDef::Float { .. } => "Float",
+        ParamDef::Float { .. } | ParamDef::Int { .. } => "Float",
         ParamDef::Color { .. } => "Color",
         ParamDef::Bool { .. } => "Bool",
         ParamDef::Point2D { .. } => "Point2D",

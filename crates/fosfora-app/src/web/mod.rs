@@ -409,6 +409,15 @@ fn apply_param(
                 values.insert(name.to_string(), ParamValue::Float(val));
                 *changed = true;
             }
+            ParamDef::Int { min, max, .. } => {
+                values.insert(
+                    name.to_string(),
+                    ParamValue::Float(
+                        (*min as f32 + (*max - *min) as f32 * value.clamp(0.0, 1.0)).round(),
+                    ),
+                );
+                *changed = true;
+            }
             ParamDef::Bool { .. } => {
                 values.insert(name.to_string(), ParamValue::Bool(value > 0.5));
                 *changed = true;

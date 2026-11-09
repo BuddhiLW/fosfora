@@ -275,6 +275,13 @@ impl MidiSystem {
                             param_values.insert(param_name.clone(), ParamValue::Float(val));
                             *param_changed = true;
                         }
+                        ParamDef::Int { min, max, .. } => {
+                            let val = (*min as f32 + (*max - *min) as f32 * scaled)
+                                .round()
+                                .clamp(*min as f32, *max as f32);
+                            param_values.insert(param_name.clone(), ParamValue::Float(val));
+                            *param_changed = true;
+                        }
                         ParamDef::Bool { .. } => {
                             param_values.insert(param_name.clone(), ParamValue::Bool(scaled > 0.5));
                             *param_changed = true;

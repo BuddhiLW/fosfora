@@ -13,6 +13,7 @@ use egui::{Color32, RichText, Sense, Stroke, TextureId, Ui, Vec2};
 
 use crate::effect::format::{EffectType, PfxEffect};
 use crate::effect::loader::EffectLoader;
+use crate::media::pack_watch::MediaPacks;
 use crate::ui::catalog_thumbs::CatalogThumbs;
 use crate::ui::theme::colors::theme_colors;
 
@@ -78,12 +79,12 @@ pub fn send_drop(ctx: &egui::Context, name: String, at: CatalogDrop) {
 }
 
 /// Picture size in the grid, in points. 16:9, like the output.
-const PIC: Vec2 = Vec2::new(176.0, 99.0);
-const NAME_H: f32 = 20.0;
+pub(super) const PIC: Vec2 = Vec2::new(176.0, 99.0);
+pub(super) const NAME_H: f32 = 20.0;
 /// The card's margin around the picture and its name.
-const CARD_PAD: f32 = 5.0;
+pub(super) const CARD_PAD: f32 = 5.0;
 /// Space between cards, both ways.
-const GAP: f32 = 10.0;
+pub(super) const GAP: f32 = 10.0;
 /// What sits above the grid (tabs and search) and below it (the authoring
 /// buttons).
 const TOOLBAR_H: f32 = 30.0;
@@ -106,6 +107,8 @@ enum Tab {
     Other,
     /// Effects the user wrote.
     Yours,
+    /// Clips from the media packs, not effects (`catalog_media`).
+    Media,
 }
 
 impl Tab {
@@ -116,6 +119,7 @@ impl Tab {
             Tab::Family(k) => (*k).into(),
             Tab::Other => "other".into(),
             Tab::Yours => "yours".into(),
+            Tab::Media => "media-packs".into(),
         }
     }
 
@@ -124,6 +128,7 @@ impl Tab {
             "fav" => Tab::Favorites,
             "other" => Tab::Other,
             "yours" => Tab::Yours,
+            "media-packs" => Tab::Media,
             _ => FAMILIES
                 .iter()
                 .find(|f| f.0 == k)
@@ -138,6 +143,7 @@ impl Tab {
             Tab::Family(k) => e.category == *k,
             Tab::Other => family_of(e).is_none(),
             Tab::Yours => !EffectLoader::is_builtin(e),
+            Tab::Media => false,
         }
     }
 }
@@ -177,6 +183,7 @@ pub struct Target {
 pub fn draw_catalog(
     ui: &mut Ui,
     loader: &EffectLoader,
+    media: &MediaPacks,
     favorites: &[String],
     thumbs: &mut CatalogThumbs,
     target: &Target,
@@ -214,14 +221,25 @@ pub fn draw_catalog(
         "Effects whose category names no family",
     ));
     tabs.push((Tab::Yours, "Yours".into(), "Effects you made"));
+    if media.configured() {
+        tabs.push((
+            Tab::Media,
+            "Media".into(),
+            "Ready-made clips from the media packs in FOSFORA_MEDIA_DIRS",
+        ));
+    }
 
     ui.horizontal_wrapped(|ui| {
         for (t, label, tip) in &tabs {
-            let n = visible
-                .iter()
-                .filter(|(_, e)| t.holds(e, favorites))
-                .count();
-            if n == 0 && !matches!(t, Tab::All | Tab::Favorites) {
+            let n = if *t == Tab::Media {
+                media.items.len()
+            } else {
+                visible
+                    .iter()
+                    .filter(|(_, e)| t.holds(e, favorites))
+                    .count()
+            };
+            if n == 0 && !matches!(t, Tab::All | Tab::Favorites | Tab::Media) {
                 continue;
             }
             let r = ui
@@ -273,6 +291,10 @@ pub fn draw_catalog(
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .max_height((ui.available_height() - FOOTER_H).max(PIC.y + NAME_H + 2.0 * CARD_PAD))
         .show(ui, |ui| {
+            if tab == Tab::Media {
+                super::catalog_media::draw_grid(ui, media, thumbs, &q, target);
+                return;
+            }
             if shown.is_empty() {
                 let msg = if tab == Tab::Favorites && q.is_empty() {
                     "No favorites yet. Hover a picture and click its star."
@@ -300,13 +322,13 @@ pub fn draw_catalog(
     footer(ui, loader, target);
 }
 
-fn tile_id(name: &str) -> egui::Id {
+pub(super) fn tile_id(name: &str) -> egui::Id {
     egui::Id::new("v2_catalog_tile").with(name)
 }
 
 /// How long the pointer has been over this tile, from last frame's hover.
 /// `None` when it is not, or while something is being dragged.
-fn hovered_for(ctx: &egui::Context, name: &str) -> Option<f64> {
+pub(super) fn hovered_for(ctx: &egui::Context, name: &str) -> Option<f64> {
     let key = tile_id(name).with("hover_since");
     let now = ctx.input(|i| i.time);
     let hovered = ctx
@@ -784,7 +806,7 @@ mod tests {
                         can_add: true,
                         active: 0,
                     };
-                    draw_catalog(ui, loader, &[], thumbs, &target);
+                    draw_catalog(ui, loader, &MediaPacks::empty(), &[], thumbs, &target);
                 });
             });
         }
@@ -866,7 +888,8 @@ mod tests {
                             can_add: true,
                             active: 0,
                         };
-                        draw_catalog(ui, &loader, &[], &mut thumbs, &target);
+                        let media = MediaPacks::empty();
+                        draw_catalog(ui, &loader, &media, &[], &mut thumbs, &target);
                     });
             }));
         }

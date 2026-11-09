@@ -99,6 +99,7 @@ pub struct ShellState<'a> {
     pub obstacle_info: Option<super::panels::obstacle_panel::ObstacleInfo>,
     pub lattice_info: Option<super::panels::lattice_panel::LatticeInfo>,
     pub helix_info: Option<super::panels::helix_panel::HelixInfo>,
+    pub svg_offset_info: Option<super::panels::svg_offset_panel::SvgOffsetInfo>,
     pub status_error: &'a Option<(String, std::time::Instant)>,
     pub settings: &'a SettingsConfig,
     /// The layer rows' pictures (#3123). `None` where there is no GPU: the
@@ -110,6 +111,8 @@ pub struct ShellState<'a> {
     pub display: Option<(egui::TextureId, f32)>,
     /// The catalog's pictures (#3124).
     pub catalog_thumbs: &'a mut crate::ui::catalog_thumbs::CatalogThumbs,
+    /// The media packs the catalog's Media tab shows.
+    pub media_packs: &'a crate::media::pack_watch::MediaPacks,
     /// Scenes, the current cue list and where the timeline is (#3173).
     pub scene: &'a scene_panel::SceneInfo,
     /// The bindings, read for what drives each control (#3127). Made and
@@ -590,6 +593,7 @@ fn bottom_drawer(ctx: &Context, s: &mut ShellState<'_>, fill: egui::Color32, ws:
                     catalog_panel::draw_catalog(
                         ui,
                         s.effect_loader,
+                        s.media_packs,
                         &s.settings.favorite_effects,
                         s.catalog_thumbs,
                         &target,
@@ -859,6 +863,11 @@ fn effect_sections(ui: &mut egui::Ui, s: &ShellState<'_>, layer: &crate::gpu::la
     if let Some(h) = &s.helix_info {
         widgets::section(ui, "v2_helix", "Helix (audio ribbon)", None, true, |ui| {
             helix_panel::draw_helix_panel(ui, h);
+        });
+    }
+    if let Some(svg) = &s.svg_offset_info {
+        widgets::section(ui, "v2_svg_offset", "SVG Offset", None, true, |ui| {
+            super::panels::svg_offset_panel::draw_svg_offset_panel(ui, svg);
         });
     }
     let mappings = layer

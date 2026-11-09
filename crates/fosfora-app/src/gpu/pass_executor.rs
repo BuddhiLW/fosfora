@@ -16,6 +16,7 @@ use super::uniforms::UniformBuffer;
 /// which reads as zero velocity.
 const PARTICLE_VELOCITY_INPUT: &str = "@particles.velocity";
 const BACKDROP_INPUT: &str = "@backdrop";
+const SVG_SDF_INPUT: &str = "@svg.sdf";
 
 /// One resolved pass-graph input, in WGSL `input0..` numbering: current-frame
 /// inputs first (`PassDef.inputs`), then previous-frame inputs
@@ -29,6 +30,8 @@ enum InputSrc {
     /// #1482) — (vx, vy, coverage, 0) in NDC units/sec, resolved during
     /// `ParticleSystem::dispatch`, i.e. same-frame for the fragment passes.
     ParticleVelocity,
+    /// Cached (signed distance, shape id, normalized distance, inradius).
+    SvgSdf,
     /// The composite of every layer BELOW this one (`@backdrop`, #2061) —
     /// the compositor's stable backdrop target, snapshotted by `frame_graph`
     /// right before this layer executes. Premultiplied RGBA; transparent when
@@ -80,6 +83,7 @@ struct PreparedPass {
 pub struct PassExecutor {
     passes: Vec<CompiledPass>,
     pub particle_system: Option<ParticleSystem>,
+    pub svg_offset: Option<super::svg_offset::SvgOffsetSim>,
     /// Owned handle to the compositor's `@backdrop` target (TextureView/Sampler
     /// are Arc'd wgpu handles, so this is a cheap clone, not a copy). None until
     /// `layer_builder` wires it; refreshed on resize because the compositor
@@ -122,6 +126,10 @@ impl PassExecutor {
                 if name.starts_with('@') {
                     if name == PARTICLE_VELOCITY_INPUT {
                         input_srcs.push(InputSrc::ParticleVelocity);
+                        continue;
+                    }
+                    if name == SVG_SDF_INPUT {
+                        input_srcs.push(InputSrc::SvgSdf);
                         continue;
                     }
                     if name == BACKDROP_INPUT {
@@ -185,9 +193,10 @@ impl PassExecutor {
                 .load_effect_source_with_inputs(&def.shader, input_count)
                 .map_err(|e| format!("Failed to load shader '{}': {e}", def.shader))?;
 
-            let pipeline =
-                ShaderPipeline::new(device, hdr_format, &source, pipeline_cache, input_count)
-                    .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
+            let unfilterable: Vec<usize> = input_srcs.iter().enumerate()
+                .filter_map(|(i,s)| matches!(s, InputSrc::SvgSdf).then_some(i)).collect();
+            let pipeline = ShaderPipeline::new_with_unfilterable_inputs(device, hdr_format, &source, pipeline_cache, input_count, &unfilterable)
+                .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
 
             // Clear feedback targets to prevent NaN/garbage from uninitialized GPU memory
             let target = if def.feedback {
@@ -236,6 +245,7 @@ impl PassExecutor {
                     audio,
                     None,
                     None,
+                    None,
                 )
             })
             .collect();
@@ -258,6 +268,7 @@ impl PassExecutor {
         Ok(Self {
             passes,
             particle_system: None,
+            svg_offset: None,
             backdrop: None,
             flip_parity: 0,
         })
@@ -288,6 +299,7 @@ impl PassExecutor {
                 audio,
                 None,
                 None,
+                None,
             )
         };
 
@@ -302,6 +314,7 @@ impl PassExecutor {
                 iterations: 1,
             }],
             particle_system: None,
+            svg_offset: None,
             backdrop: None,
             flip_parity: 0,
         }
@@ -436,6 +449,9 @@ impl PassExecutor {
             ps.render(scope.encoder(), queue, &final_target.view);
         }
 
+        if let Some(svg) = &self.svg_offset {
+            svg.render(encoder, queue, &uniforms.params, &final_target.view);
+        }
         final_target
     }
 
@@ -505,6 +521,9 @@ impl PassExecutor {
             ps.resize_wboit(device, width, height);
         }
 
+        if let Some(svg) = &mut self.svg_offset {
+            if let Err(e) = svg.resize(device, queue, width, height) { log::error!("SVG resize: {e}"); }
+        }
         // Phase 2: rebuild all bind groups against the new targets (a pass may
         // sample another pass's just-recreated target).
         self.rebuild_all_bind_groups(device, uniform_buffer, placeholder, audio);
@@ -513,7 +532,7 @@ impl PassExecutor {
     /// Rebuild every pass's bind groups from the current targets/layouts. Reads
     /// `&self.passes` to a `Vec<PassView>`, collects the new groups, then assigns
     /// — so cross-pass target references never alias a mutable borrow.
-    fn rebuild_all_bind_groups(
+    pub fn rebuild_all_bind_groups(
         &mut self,
         device: &Device,
         uniform_buffer: &UniformBuffer,
@@ -546,6 +565,7 @@ impl PassExecutor {
                         placeholder,
                         audio,
                         particle_velocity,
+                        self.svg_offset.as_ref().map(|s| s.sdf()),
                         backdrop,
                     )
                 })
@@ -650,6 +670,7 @@ fn build_bind_groups(
     placeholder: &PlaceholderTexture,
     audio: &AudioTextures,
     particle_velocity: Option<(&TextureView, &Sampler)>,
+    svg_sdf: Option<(&TextureView, &Sampler)>,
     backdrop: Option<(&TextureView, &Sampler)>,
 ) -> [wgpu::BindGroup; 2] {
     let view = &views[i];
@@ -691,6 +712,7 @@ fn build_bind_groups(
                 InputSrc::ParticleVelocity => {
                     particle_velocity.unwrap_or((&placeholder.view, &placeholder.sampler))
                 }
+                InputSrc::SvgSdf => svg_sdf.unwrap_or((&placeholder.view, &placeholder.nearest_sampler)),
                 InputSrc::Backdrop => backdrop.unwrap_or((&placeholder.view, &placeholder.sampler)),
             })
             .collect();

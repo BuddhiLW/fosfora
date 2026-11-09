@@ -1,0 +1,109 @@
+{
+ "version": 1,
+ "items": [
+  {
+   "description": "Graphene: Fermi contours rising from the Dirac points",
+   "thumb": "graphene-fermi/thumb.webp",
+   "tags": [
+    "graphene",
+    "fermi-surface",
+    "dirac",
+    "hexagonal"
+   ],
+   "family": "Lattices",
+   "source": "tessera.loops/graphene-fermi",
+   "seconds": 16,
+   "title": "Graphene Fermi Contours",
+   "loop": true,
+   "author": "tessera",
+   "fps": 30,
+   "preview": "graphene-fermi/preview.webp",
+   "id": "graphene-fermi",
+   "clips": {
+    "hd": "graphene-fermi/clip-hd.mp4",
+    "uw": "graphene-fermi/clip-uw.mp4"
+   }
+  },
+  {
+   "description": "Three-body atlas — figure eight, Butterfly I, Moth I, Yin-yang 1a",
+   "thumb": "choreographies/thumb.webp",
+   "tags": [
+    "three-body",
+    "figure-eight",
+    "n-body",
+    "choreography"
+   ],
+   "family": "Orbits",
+   "source": "tessera.loops/choreographies",
+   "seconds": 24,
+   "title": "Three-Body Choreographies",
+   "loop": true,
+   "author": "tessera",
+   "fps": 30,
+   "preview": "choreographies/preview.webp",
+   "id": "choreographies",
+   "clips": {
+    "uw": "choreographies/clip-uw.mp4"
+   }
+  },
+  {
+   "description": "9-fold quasiperiodic contours",
+   "thumb": "fold-9/thumb.webp",
+   "tags": [
+    "quasiperiodic",
+    "nine-fold",
+    "contours"
+   ],
+   "family": "Tilings",
+   "source": "tessera.loops/fold-9",
+   "seconds": 16,
+   "title": "Nine-Fold Contours",
+   "loop": true,
+   "author": "tessera",
+   "fps": 30,
+   "preview": "fold-9/preview.webp",
+   "id": "fold-9",
+   "clips": {
+    "hd": "fold-9/clip-hd.mp4"
+   }
+  },
+  {
+   "description": "Lissajous lattice: ice-blue comets in twelve cells",
+   "thumb": "lissajous-3d/thumb.webp",
+   "tags": [
+    "lissajous",
+    "3d",
+    "comets",
+    "harmonic"
+   ],
+   "family": "Curves",
+   "source": "tessera.loops/lissajous-3d",
+   "seconds": 20,
+   "title": "Lissajous Lattice",
+   "loop": true,
+   "author": "tessera",
+   "fps": 30,
+   "id": "lissajous-3d",
+   "clips": {}
+  },
+  {
+   "description": "Gold girih under an orbiting lamp (LuxCore path tracing)",
+   "tags": [
+    "girih",
+    "gold",
+    "path-traced",
+    "luxcore",
+    "3d"
+   ],
+   "family": "Tilings",
+   "source": "tessera.loops/girih-gold",
+   "seconds": 8,
+   "title": "Gold Girih",
+   "loop": true,
+   "author": "tessera",
+   "fps": 15,
+   "id": "girih-gold",
+   "clips": {}
+  }
+ ]
+}

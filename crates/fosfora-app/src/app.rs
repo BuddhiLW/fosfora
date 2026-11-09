@@ -42,6 +42,10 @@ use crate::ui::EguiOverlay;
 use crate::ui::panels::shader_editor::ShaderEditorState;
 use crate::web::WebSystem;
 
+#[path = "app_media_packs.rs"]
+mod media_packs;
+pub use media_packs::PendingPlacement;
+
 /// The outgoing preset of a live Dissolve, with the volumetric settings it
 /// rendered with (the incoming preset's load replaces App's).
 pub struct RetiringStack {
@@ -167,6 +171,10 @@ pub struct App {
     pub layer_thumbs: crate::gpu::layer_thumbs::LayerThumbs,
     /// The v2 catalog's effect pictures, decoded on first use (#3124).
     pub catalog_thumbs: crate::ui::catalog_thumbs::CatalogThumbs,
+    /// The catalog's Media tab: the packs in `FOSFORA_MEDIA_DIRS`, watched.
+    pub media_packs: crate::media::pack_watch::MediaPacks,
+    /// Pack clips still decoding, and where on the stack each one goes.
+    pub media_placements: Vec<PendingPlacement>,
     /// The second output window, when one is open (#3122). It presents the
     /// display target above and carries no interface. Opened and closed from
     /// `main.rs`, where the `ActiveEventLoop` that can create a window lives.
@@ -693,6 +701,8 @@ impl App {
             display,
             layer_thumbs,
             catalog_thumbs: crate::ui::catalog_thumbs::CatalogThumbs::shipped(),
+            media_packs: crate::media::pack_watch::MediaPacks::from_env(),
+            media_placements: Vec::new(),
             output_window: None,
             displays: Vec::new(),
             volumetric_enabled: false,
@@ -2362,15 +2372,20 @@ impl App {
                                 load.file_name,
                                 load.started.elapsed().as_secs_f32()
                             );
+                            let (path, n) = (load.path.clone(), self.layer_stack.layers.len());
                             self.add_media_layer_from_source(load.path, source);
+                            let landed = self.layer_stack.layers.len() > n;
+                            self.place_pack_media(&path, landed);
                             added += 1;
                         }
                         Err(e) if load.progress.cancel.load(Ordering::Relaxed) => {
                             log::info!("Cancelled loading {}: {e}", load.file_name);
+                            self.place_pack_media(&load.path, false);
                         }
                         Err(e) => {
                             log::error!("Failed to load media '{}': {e}", load.path.display());
                             self.status_error = Some((e, Instant::now()));
+                            self.place_pack_media(&load.path, false);
                         }
                     }
                 }
@@ -2394,6 +2409,7 @@ impl App {
     /// Stop every pending decode: the stack it was meant for is being
     /// replaced (a preset load, Clear stack).
     pub fn cancel_media_loads(&mut self) {
+        self.media_placements.clear();
         for load in self.media_loads.drain(..) {
             load.progress.cancel.store(true, Ordering::Relaxed);
         }
@@ -3104,6 +3120,8 @@ impl App {
                     obstacle_model,
                     lattice,
                     helix,
+                    svg_offset_path: l.as_effect().and_then(|e| e.pass_executor.svg_offset.as_ref()).and_then(|s| s.path.clone()),
+                    svg_offset_settings: l.as_effect().and_then(|e| e.pass_executor.svg_offset.as_ref()).map(|s| s.settings.clone()),
                     particle_sim,
                     chain,
                 }
@@ -3952,6 +3970,16 @@ impl App {
                 layer.locked = lp.locked;
                 layer.pinned = lp.pinned;
                 layer.custom_name = lp.custom_name.clone();
+                if let Some(e) = layer.as_effect_mut() {
+                    if let Some(svg) = &mut e.pass_executor.svg_offset {
+                        let settings = lp.svg_offset_settings.clone().unwrap_or_else(|| svg.settings.clone());
+                        if let Err(err) = svg.reload(&device, &self.gpu.queue, lp.svg_offset_path.as_deref(), settings, self.render_size.0, self.render_size.1) {
+                            log::warn!("SVG preset source: {err}");
+                            self.status_error = Some((format!("SVG preset source: {err}"), Instant::now()));
+                        }
+                        e.pass_executor.rebuild_all_bind_groups(&device, &e.uniform_buffer, &self.placeholder, &self.audio_textures);
+                    }
+                }
                 // Restore live particle-sim / Lattice panel edits over the
                 // `.pfx` defaults that `ParticleSystem::new` just reset (runs
                 // after the effect reload above, so this is the final word).
