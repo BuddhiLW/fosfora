@@ -18,14 +18,23 @@ const EXEMPT: &[(&str, &str)] = &[
     ("dismiss_shader_error", "closes an error toast in the window"),
 ];
 
-/// Every egui temp id `main.rs` consumes.
+/// The ways `main.rs` consumes a UI signal: a typed or untyped `remove_temp`
+/// of an egui temp id, or the cue strip's `take("...")` helper.
+const NEEDLES: &[&str] = &[
+    "remove_temp(egui::Id::new(\"",
+    "remove_temp::<bool>(egui::Id::new(\"",
+    "take(\"",
+];
+
+/// Every UI signal `main.rs` consumes.
 fn ui_signals() -> BTreeSet<&'static str> {
-    const NEEDLE: &str = "remove_temp(egui::Id::new(\"";
-    MAIN_RS
-        .match_indices(NEEDLE)
-        .filter_map(|(at, _)| {
-            let rest = &MAIN_RS[at + NEEDLE.len()..];
-            rest.find('"').map(|end| &rest[..end])
+    NEEDLES
+        .iter()
+        .flat_map(|needle| {
+            MAIN_RS.match_indices(needle).filter_map(move |(at, _)| {
+                let rest = &MAIN_RS[at + needle.len()..];
+                rest.find('"').map(|end| &rest[..end])
+            })
         })
         .collect()
 }
