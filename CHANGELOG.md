@@ -3,7 +3,9 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
-## Unreleased
+## v2.8.1-bw.2 — 2026-11-08
+
+Fork build of upstream main plus the live REPL branch (upstream PR #299), with clojurust pinned to the BuddhiLW fork.
 
 ### Added
 - **Sync offset.** When beat-bound visuals trail the sound in the room, Setup › Audio › Sync offset fires beats, downbeats and the beat and bar phases up to 200 ms early (capped just under half a beat); levels stay as they are. When the sound reaches the audience after the picture, a negative value of up to 250 ms holds every feature back. It also applies to `fosfora --signal`, and leaving it at 0 changes nothing.
