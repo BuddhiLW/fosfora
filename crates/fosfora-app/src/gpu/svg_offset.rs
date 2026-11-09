@@ -821,6 +821,68 @@ mod tests {
         queue.submit([encoder.finish()]);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         assert!(pollster::block_on(device.pop_error_scope()).is_none());
+        // Exercise the production special-input path too: its Rgba32Float binding
+        // must be nonfiltering, including before attachment and after resize.
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let _ = crate::effect::loader::set_assets_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../assets")
+                .canonicalize()
+                .unwrap(),
+        );
+        let loader = crate::effect::EffectLoader::new();
+        let effect: crate::effect::format::PfxEffect =
+            serde_json::from_str(include_str!("../../../../assets/effects/svg_offset.pfx"))
+                .unwrap();
+        let ub = crate::gpu::UniformBuffer::new(&device);
+        let placeholder = crate::gpu::placeholder::PlaceholderTexture::new(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba16Float,
+        );
+        let audio = crate::gpu::audio_textures::AudioTextures::new(&device, &queue);
+        let mut executor = crate::gpu::pass_executor::PassExecutor::new(
+            &device,
+            wgpu::TextureFormat::Rgba16Float,
+            64,
+            64,
+            &effect.normalized_passes(),
+            &loader,
+            &ub,
+            &placeholder,
+            &audio,
+            &queue,
+            None,
+        )
+        .unwrap();
+        executor.svg_offset = Some(
+            SvgOffsetSim::new(&device, &queue, wgpu::TextureFormat::Rgba16Float, 64, 64).unwrap(),
+        );
+        executor.rebuild_all_bind_groups(&device, &ub, &placeholder, &audio);
+        let mut params = crate::params::ParamStore::new();
+        params.load_from_defs(&effect.inputs);
+        let uniforms = crate::gpu::ShaderUniforms {
+            params: params.pack_to_buffer(),
+            ..Zeroable::zeroed()
+        };
+        for (frame, size) in [64, 96, 64].into_iter().enumerate() {
+            executor.resize(&device, &queue, size, size, &ub, &placeholder, &audio);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            executor.execute(&mut encoder, &ub, &queue, &uniforms);
+            queue.submit([encoder.finish()]);
+            if frame < 2 {
+                executor.flip();
+            }
+        }
+        let pixels =
+            crate::gpu::test_gpu::snapshot(&device, &queue, &executor.final_targets().0.view, 64);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let validation = pollster::block_on(device.pop_error_scope());
+        assert!(validation.is_none(), "{validation:?}");
+        assert!(
+            pixels.iter().any(|&v| v != 0),
+            "native executor must draw visible contours"
+        );
         // Readback proves the two transforms and atomic inradius, not just shader compilation.
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect x="2" y="2" width="12" height="14"/></svg>"#).unwrap();

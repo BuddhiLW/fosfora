@@ -136,7 +136,9 @@ impl ParamStore {
 
     fn discrete_value(&self, name: &str, value: ParamValue) -> ParamValue {
         match (self.defs.iter().find(|d| d.name() == name), value) {
-            (Some(ParamDef::Int { min, max, .. }), ParamValue::Float(v)) => ParamValue::Float(v.round().clamp(*min as f32, *max as f32)),
+            (Some(ParamDef::Int { min, max, .. }), ParamValue::Float(v)) => {
+                ParamValue::Float(v.round().clamp(*min as f32, *max as f32))
+            }
             (_, value) => value,
         }
     }
@@ -631,7 +633,11 @@ mod tests {
                 }
                 assert_eq!(
                     buf[*off],
-                    100.0 + i as f32,
+                    match def {
+                        ParamDef::Int { min, max, .. } =>
+                            (100.0 + i as f32).round().clamp(*min as f32, *max as f32),
+                        _ => 100.0 + i as f32,
+                    },
                     "{}: `{}` packed away from offset {off}",
                     effect.name,
                     def.name()

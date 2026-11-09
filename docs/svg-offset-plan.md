@@ -37,6 +37,9 @@ Spec: hive memory 20261108205043-257c55ee. Rate rules: 20261108035519-065dd5a5.
     scripts/build_thumbnails.py. Otherwise mark the effect hidden=false and generate the thumbs.
     Check the templates test as well: every audio template must bind something.
 
-## Status
-- Done: study and design. No code yet.
-- Next: Cargo.toml dep, then svg_offset.rs with its CPU parts and tests, then the WGSL, then the integration.
+## Implementation status
+- Implemented in `91a0b95`, `049002b`, `9a3fb6b`, `981662a`; native GPU catalog previews in `1887e75`.
+- The implementation follows the required Rgba32Float field (not the rgba16float proposal above) and uses tiny-skia directly for rasterization.
+- Required mode/color/order enums are real Int inputs, using the existing f32 uniform/value ABI. Thirteen input slots plus speed/hue-speed integrals occupy slots 0..14.
+- Presets carry serde-defaulted `svg_offset_path` and `svg_offset_settings` fields.
+- Usage, limitations, build and test commands: [SVG Offset](svg-offset.md).
