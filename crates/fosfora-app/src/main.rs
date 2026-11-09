@@ -3361,8 +3361,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("open_trama_on_master")));
                 if open_master == Some(true) {
-                    app.trama.canvas_target = crate::trama::CanvasTarget::Master;
-                    app.trama.canvas_open = true;
+                    app.open_trama_on_master();
                 }
 
                 // A layer row's trama badge: select that layer and put the
@@ -3372,12 +3371,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("open_trama_on_layer")));
                 if let Some(idx) = open_trama {
-                    if idx < app.layer_stack.layers.len() {
-                        app.layer_stack.active_layer = idx;
-                        app.sync_active_layer();
-                        app.trama.canvas_target = crate::trama::CanvasTarget::SelectedLayer;
-                        app.trama.canvas_open = true;
-                    }
+                    app.open_trama_on_layer(idx);
                 }
 
                 // Handle lock/pin toggles
