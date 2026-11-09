@@ -131,7 +131,11 @@ impl Repl {
         let out = TcpStream::connect(("127.0.0.1", port)).expect("connect to FOSFORA_IT_NREPL");
         out.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         let input = BufReader::new(out.try_clone().unwrap());
-        Self { out, input, next_id: 0 }
+        Self {
+            out,
+            input,
+            next_id: 0,
+        }
     }
 
     /// Evaluate `code`; the printed value, or the error text.
@@ -199,7 +203,9 @@ fn every_builtin_addon_is_reachable_over_nrepl() {
         return;
     };
     let addons = repl.eval("(f/addons)").unwrap();
-    for id in ["core", "preset", "scene", "layer", "particle", "trama", "bindings", "system"] {
+    for id in [
+        "core", "preset", "scene", "layer", "particle", "trama", "bindings", "system",
+    ] {
         assert!(addons.contains(id), "{id} missing from {addons}");
     }
     let names = repl.eval("(mapv :name (f/ops))").unwrap();
@@ -222,7 +228,9 @@ fn a_preset_saved_over_nrepl_lists_and_deletes() {
         assert!(e.contains("nothing to save"), "{e}");
         return;
     }
-    let listed = repl.eval(&format!("(some #(= \"{name}\" (:name %)) (preset/ls))")).unwrap();
+    let listed = repl
+        .eval(&format!("(some #(= \"{name}\" (:name %)) (preset/ls))"))
+        .unwrap();
     assert_eq!(listed, "true");
     repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
     assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
@@ -239,5 +247,29 @@ fn the_scene_namespace_reads_the_library_and_timeline_over_nrepl() {
     let state = repl.eval("(contains? (scene/current) :playing)").unwrap();
     assert_eq!(state, "true");
     let mode = repl.eval("(:mode (:advance (scene/timeline!)))").unwrap();
-    assert!(["\"manual\"", "\"timer\"", "\"beats\""].contains(&mode.as_str()), "{mode}");
+    assert!(
+        ["\"manual\"", "\"timer\"", "\"beats\""].contains(&mode.as_str()),
+        "{mode}"
+    );
+}
+
+#[test]
+fn a_layer_opacity_set_over_nrepl_reads_back_and_is_restored() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    assert_ne!(repl.eval("(count (layer/ls))").unwrap(), "0");
+    let e = repl.eval("(layer/blend! nil :no-such-blend)").unwrap_err();
+    assert!(e.contains("no blend mode"), "{e}");
+    if repl.eval("(:locked (layer/get-layer))").unwrap() == "true" {
+        return;
+    }
+    let before = repl.eval("(:opacity (layer/get-layer))").unwrap();
+    assert_eq!(
+        repl.eval("(:opacity (layer/opacity! nil 0.25))").unwrap(),
+        "0.25"
+    );
+    repl.eval(&format!("(layer/opacity! nil {before})"))
+        .unwrap();
 }
