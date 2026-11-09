@@ -20,6 +20,7 @@ pub mod postprocess;
 pub mod profiler;
 pub mod render_target;
 pub mod shader_compiler;
+pub mod svg_offset;
 #[cfg(test)]
 pub mod test_gpu;
 pub mod types;

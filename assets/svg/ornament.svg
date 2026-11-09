@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="-400 -400 800 800">
+  <!-- Original procedural rosette: a central sun, eight leaves, two orbit bands. -->
+  <defs><path id="leaf" d="M0 -110 C-100 -175 -100 -280 0 -350 C100 -280 100 -175 0 -110Z"/></defs>
+  <g fill="#ff734c">
+    <use href="#leaf"/><use href="#leaf" transform="rotate(90)"/>
+    <use href="#leaf" transform="rotate(180)"/><use href="#leaf" transform="rotate(270)"/>
+  </g>
+  <g fill="#46d4ba" transform="rotate(45)">
+    <use href="#leaf"/><use href="#leaf" transform="rotate(90)"/>
+    <use href="#leaf" transform="rotate(180)"/><use href="#leaf" transform="rotate(270)"/>
+  </g>
+  <g fill="none" stroke="#b39aff" stroke-width="9">
+    <circle r="366"/><circle r="97"/>
+  </g>
+  <path fill="#ffc85e" d="M0 -75 22 -38 65 -38 44 0 65 38 22 38 0 75 -22 38 -65 38 -44 0 -65 -38 -22 -38Z"/>
+  <circle r="24" fill="#fff3da"/>
+</svg>

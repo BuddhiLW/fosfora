@@ -82,6 +82,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 image-webp = "0.2"
 # GIF decoding (animated GIF frame extraction)
 gif = "0.14"
+# Runtime SVG geometry and per-shape ID rasterization (matches the locked skia version).
+usvg = { version = "0.45", default-features = false }
+tiny-skia = "=0.11.4"
 # Native file dialogs
 rfd = { version = "0.17", optional = true }
 # Linear algebra (camera, projection)
