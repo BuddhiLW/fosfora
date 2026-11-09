@@ -2370,30 +2370,14 @@ impl ApplicationHandler for FosforaApp {
                     }
                 }
 
-                // Handle scene UI signals
+                // Handle scene UI signals (shared with the scene/* ops)
+                use fosfora_app::control::ops::scene::{CueEdit, advance_from_ui_id};
                 let save_scene: Option<String> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("save_scene")));
                 if let Some(name) = save_scene {
-                    let is_new = !app.scene_store.scenes.iter().any(|(n, _)| n == &name);
-                    if is_new {
-                        // New scene: clear timeline so user starts with a blank cue list
-                        app.timeline.cues.clear();
-                        app.timeline.stop();
-                        app.timeline.loop_mode = false;
-                        app.timeline.advance_mode = crate::scene::types::AdvanceMode::Manual;
-                    }
-                    let set = crate::scene::types::SceneSet {
-                        version: 1,
-                        name: name.clone(),
-                        cues: app.timeline.cues.clone(),
-                        loop_mode: app.timeline.loop_mode,
-                        advance_mode: app.timeline.advance_mode,
-                    };
-                    if let Err(e) = app.scene_store.save(&name, set) {
-                        log::error!("Failed to save scene: {e}");
-                    }
+                    app.save_scene(&name);
                 }
                 let load_scene_idx: Option<usize> = app
                     .egui_overlay
@@ -2448,28 +2432,21 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_go_next")));
                 if scene_go_next.is_some() {
-                    let event = app.timeline.go_next();
-                    app.process_timeline_event(event);
+                    app.scene_go_next();
                 }
                 let scene_go_prev: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_go_prev")));
                 if scene_go_prev.is_some() {
-                    let event = app.timeline.go_prev();
-                    app.process_timeline_event(event);
+                    app.scene_go_prev();
                 }
                 let scene_toggle_play: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_toggle_play")));
                 if scene_toggle_play.is_some() {
-                    if app.timeline.active {
-                        app.timeline.stop();
-                    } else if !app.timeline.cues.is_empty() {
-                        let event = app.timeline.start(0);
-                        app.process_timeline_event(event);
-                    }
+                    app.toggle_scene_play();
                 }
 
                 // Drain scene transport triggers from binding bus
@@ -2477,14 +2454,8 @@ impl ApplicationHandler for FosforaApp {
                 for action in pending {
                     use fosfora_app::bindings::types::TransportAction;
                     match action {
-                        TransportAction::Go => {
-                            let event = app.timeline.go_next();
-                            app.process_timeline_event(event);
-                        }
-                        TransportAction::Prev => {
-                            let event = app.timeline.go_prev();
-                            app.process_timeline_event(event);
-                        }
+                        TransportAction::Go => app.scene_go_next(),
+                        TransportAction::Prev => app.scene_go_prev(),
                         TransportAction::Stop => {
                             app.timeline.stop();
                         }
@@ -2497,8 +2468,7 @@ impl ApplicationHandler for FosforaApp {
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_add_cue")));
                 let mut scene_dirty = false;
                 if let Some(preset_name) = add_cue {
-                    let cue = app.new_cue(preset_name);
-                    app.timeline.cues.push(cue);
+                    app.add_scene_cue(preset_name);
                     scene_dirty = true;
                 }
                 // The workspace's cue strip (#3173): a preset dropped between
@@ -2509,8 +2479,7 @@ impl ApplicationHandler for FosforaApp {
                 if let Some((name, at)) =
                     ctx.data_mut(|d| d.remove_temp::<(String, usize)>(take("scene_insert_cue")))
                 {
-                    let cue = app.new_cue(name);
-                    app.timeline.insert_cue(at, cue);
+                    app.insert_scene_cue(at, name);
                     scene_dirty = true;
                 }
                 if let Some((from, to)) =
@@ -2522,34 +2491,26 @@ impl ApplicationHandler for FosforaApp {
                 if let Some((idx, label)) =
                     ctx.data_mut(|d| d.remove_temp::<(usize, String)>(take("scene_set_cue_label")))
                 {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        let label = label.trim();
-                        cue.label = (!label.is_empty()).then(|| label.to_string());
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::label(label));
                 }
                 if let Some(idx) =
                     ctx.data_mut(|d| d.remove_temp::<usize>(take("scene_clear_cue_hold")))
                 {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.hold_secs = None;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::hold(None));
                 }
                 let scene_jump: Option<usize> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_jump_to_cue")));
                 if let Some(cue_idx) = scene_jump {
-                    let event = app.timeline.go_to_cue(cue_idx);
-                    app.process_timeline_event(event);
+                    app.scene_jump_to_cue(cue_idx);
                 }
                 let scene_loop: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_loop")));
                 if let Some(loop_mode) = scene_loop {
-                    app.timeline.loop_mode = loop_mode;
+                    app.set_scene_loop(loop_mode);
                     scene_dirty = true;
                 }
                 let scene_remove_cue: Option<usize> = app
@@ -2557,11 +2518,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_remove_cue")));
                 if let Some(cue_idx) = scene_remove_cue {
-                    if cue_idx < app.timeline.cues.len() {
-                        app.timeline.cues.remove(cue_idx);
-                        app.timeline.notify_cue_removed(cue_idx);
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.remove_scene_cue(cue_idx);
                 }
                 // Per-cue transition type
                 let set_cue_transition: Option<(usize, crate::scene::types::TransitionType)> = app
@@ -2569,10 +2526,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_transition")));
                 if let Some((idx, tt)) = set_cue_transition {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.transition = tt;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::transition(tt));
                 }
                 // Per-cue transition duration
                 let set_cue_dur: Option<(usize, f32)> = app
@@ -2580,10 +2534,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_transition_secs")));
                 if let Some((idx, secs)) = set_cue_dur {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.transition_secs = secs;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::secs(secs));
                 }
                 // Advance mode
                 let set_advance: Option<u32> = app
@@ -2591,19 +2542,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_advance_mode")));
                 if let Some(mode_id) = set_advance {
-                    app.timeline.advance_mode = match mode_id {
-                        1 => {
-                            // Initialize hold_secs for cues that don't have one
-                            for cue in &mut app.timeline.cues {
-                                if cue.hold_secs.is_none() {
-                                    cue.hold_secs = Some(4.0);
-                                }
-                            }
-                            crate::scene::types::AdvanceMode::Timer
-                        }
-                        2 => crate::scene::types::AdvanceMode::BeatSync { beats_per_cue: 4 },
-                        _ => crate::scene::types::AdvanceMode::Manual,
-                    };
+                    app.set_scene_advance_mode(advance_from_ui_id(mode_id));
                     scene_dirty = true;
                 }
                 // Beats per cue (BeatSync)
@@ -2612,13 +2551,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_beats_per_cue")));
                 if let Some(bpc) = set_bpc {
-                    if let crate::scene::types::AdvanceMode::BeatSync {
-                        ref mut beats_per_cue,
-                    } = app.timeline.advance_mode
-                    {
-                        *beats_per_cue = bpc;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.set_scene_beats_per_cue(bpc);
                 }
                 // Per-cue hold seconds (Timer mode)
                 let set_hold: Option<(usize, f32)> = app
@@ -2626,10 +2559,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_hold_secs")));
                 if let Some((idx, hold)) = set_hold {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.hold_secs = Some(hold);
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::hold(Some(hold)));
                 }
 
                 // Auto-save scene after any cue/timeline mutation

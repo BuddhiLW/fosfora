@@ -1,3 +1,78 @@
 (ns fosfora.scene
-  "Scenes and cues. Preloaded as `scene`."
+  "Scenes and their cue timeline, as the Scenes panel and cue strip handle
+  them. Preloaded as `scene`:
+
+    (scene/ls)                         ; [{:index 0 :name \"Set A\" :cues 4 :current true} ...]
+    (scene/current)                    ; open scene, playback, loop, advance, cues
+    (scene/save! \"Set B\")              ; a new name starts a blank cue list
+    (scene/open! \"set a\")              ; edit without playing (index or name)
+    (scene/load! 0)                    ; open and play from the first cue
+    (scene/add-cue!)                   ; a cue for the loaded preset
+    (scene/add-cue! \"Tunnel\" :at 0)
+    (scene/set-cue! 1 :transition :dissolve :secs 2.0 :hold 8 :label \"Drop\")
+    (scene/set-cue! 1 :hold false)     ; wait for Go
+    (scene/move-cue! 3 0) (scene/remove-cue! 2)
+    (scene/play!) (scene/next!) (scene/prev!) (scene/jump! 2) (scene/stop!)
+    (scene/timeline! :loop true :advance :beats :beats 8)
+    (scene/rename! \"Set B\" \"Encore\") (scene/duplicate! 0) (scene/delete! \"Encore\")"
   (:require [fosfora :as f]))
+
+(defn- target [s] (if (integer? s) {:index s} {:name (str s)}))
+
+(defn ls [] (f/op :scene/list))
+(defn current [] (f/op :scene/current))
+(defn cues [] (:cues (current)))
+
+(defn save! [name] (f/op :scene/save {:name name}))
+(defn open! [s] (f/op :scene/open (target s)))
+(defn load! [s] (f/op :scene/load (target s)))
+(defn delete! [s] (f/op :scene/delete (target s)))
+(defn rename! [s to] (f/op :scene/rename (assoc (target s) :to to)))
+(defn duplicate! [s] (f/op :scene/duplicate (target s)))
+
+(defn add-cue!
+  "Add a cue for preset `p` (index or name; default the loaded preset).
+  Options: :at n to insert instead of appending."
+  ([] (f/op :scene/add-cue {}))
+  ([p & {:keys [at]}]
+   (f/op :scene/add-cue (cond-> {:preset p} at (assoc :at at)))))
+
+(defn remove-cue! [i] (f/op :scene/remove-cue {:cue i}))
+(defn move-cue! [from to] (f/op :scene/move-cue {:from from :to to}))
+
+(defn cue
+  "Cue `i` of the open scene."
+  [i]
+  (f/op :scene/set-cue {:cue i}))
+
+(defn set-cue!
+  "Change cue `i`: :transition (:cut :dissolve :morph), :secs, :hold (seconds,
+  or false to wait for Go), :label."
+  [i & {:keys [transition secs hold label] :as opts}]
+  (f/op :scene/set-cue
+        (cond-> {:cue i}
+          transition (assoc :transition (name transition))
+          secs (assoc :secs (double secs))
+          (contains? opts :hold) (assoc :hold (if hold (double hold) false))
+          label (assoc :label label))))
+
+(defn play!
+  "Play from cue `i` (default the first)."
+  ([] (f/op :scene/play {}))
+  ([i] (f/op :scene/play {:cue i})))
+
+(defn stop! [] (f/op :scene/stop))
+(defn toggle! [] (f/op :scene/toggle))
+(defn next! [] (f/op :scene/next))
+(defn prev! [] (f/op :scene/prev))
+(defn jump! [i] (f/op :scene/jump {:cue i}))
+
+(defn timeline!
+  "Read the loop flag and advance mode, or change them:
+  (scene/timeline! :loop true :advance :timer), (scene/timeline! :beats 8)."
+  [& {looping :loop, :keys [advance beats] :as opts}]
+  (f/op :scene/timeline
+        (cond-> {}
+          (contains? opts :loop) (assoc :loop (boolean looping))
+          advance (assoc :advance (name advance))
+          beats (assoc :beats beats))))

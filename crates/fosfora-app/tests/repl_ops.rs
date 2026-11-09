@@ -227,3 +227,17 @@ fn a_preset_saved_over_nrepl_lists_and_deletes() {
     repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
     assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
 }
+
+#[test]
+fn the_scene_namespace_reads_the_library_and_timeline_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Read-only: the user's scenes and cue list are left as they are.
+    assert_eq!(repl.eval("(vector? (scene/ls))").unwrap(), "true");
+    let state = repl.eval("(contains? (scene/current) :playing)").unwrap();
+    assert_eq!(state, "true");
+    let mode = repl.eval("(:mode (:advance (scene/timeline!)))").unwrap();
+    assert!(["\"manual\"", "\"timer\"", "\"beats\""].contains(&mode.as_str()), "{mode}");
+}
