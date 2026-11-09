@@ -3,13 +3,19 @@
 //! - `ffprobe` probes metadata (dimensions, fps, duration) synchronously at load time
 //! - `ffmpeg -f rawvideo -pix_fmt rgba` decodes ALL frames to memory in one pass
 //! - Returns `MediaSource::Animated` — identical to GIF, instant random access
-//! - RAM cost: ~3.7MB per frame at 1280x720. A 30s@30fps clip = ~3.3GB.
+//! - RAM cost: ~3.7MB per frame at 1280x720. A 30s@30fps clip = ~3.3GB, so a
+//!   clip is pre-decoded only within the `predecode_budget` byte budget; past it the
+//!   media layer streams instead (`decoder::load_video`).
 
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+use super::ffmpeg_stderr::{spawn_tail, zero_frames_error};
+use super::predecode_budget::{
+    PREDECODE_MAX_MB_ENV, PredecodeError, predecode_budget_bytes, predecode_refusal,
+};
 use super::types::DecodedFrame;
 
 /// Check if ffmpeg/ffprobe are available on the system. Cached per process.
@@ -103,27 +109,33 @@ fn parse_frame_rate(rate: &str) -> f64 {
     }
 }
 
-/// Pre-decode all video frames via a single ffmpeg run.
+/// Maximum video duration (seconds) we'll pre-decode. Beyond this, reject.
+pub const MAX_PREDECODE_SECS: f64 = 60.0;
+
+/// Pre-decode all video frames via a single ffmpeg run, stopping once they
+/// would take more than `budget_bytes`.
 /// Returns (frames, delays_ms) ready for `MediaSource::Animated`.
 pub fn decode_all_frames(
     path: &Path,
     meta: &VideoMeta,
     progress: &super::decoder::MediaProgress,
-) -> Result<(Vec<DecodedFrame>, Vec<u32>), String> {
+    budget_bytes: u64,
+) -> Result<(Vec<DecodedFrame>, Vec<u32>), PredecodeError> {
     use std::sync::atomic::Ordering;
-    let frame_size = (meta.width as usize) * (meta.height as usize) * 4;
+    let frame_bytes = meta.frame_bytes();
+    let frame_size = frame_bytes as usize;
     let delay_ms = (1000.0 / meta.fps).round() as u32;
-
-    // Estimate RAM and warn
-    let est_frames = (meta.duration_secs * meta.fps).ceil() as usize;
-    let est_ram_mb = (est_frames * frame_size) / (1024 * 1024);
+    let est_frames = meta.estimated_frames();
+    let budget_frames = budget_bytes / frame_bytes.max(1);
     log::info!(
-        "Pre-decoding video: ~{} frames, ~{}MB RAM",
+        "Pre-decoding video: ~{} frames, ~{}MB RAM (budget {}MB)",
         est_frames,
-        est_ram_mb,
+        meta.estimated_predecode_bytes() >> 20,
+        budget_bytes >> 20,
     );
 
     let mut child = Command::new("ffmpeg")
+        .args(["-v", "error"])
         .args(super::hwaccel::input_args())
         .args(["-i"])
         .arg(path)
@@ -135,30 +147,49 @@ pub fn decode_all_frames(
             "rgba",
             "-s",
             &format!("{}x{}", meta.width, meta.height),
-            "-v",
-            "quiet",
             "pipe:1",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn ffmpeg: {e}"))?;
+        .map_err(|e| PredecodeError::Failed(format!("Failed to spawn ffmpeg: {e}")))?;
+    let stderr_tail = spawn_tail(child.stderr.take());
+    let finish = |child: &mut std::process::Child| {
+        let status = child.wait().ok();
+        let text = stderr_tail.and_then(|h| h.join().ok()).unwrap_or_default();
+        (status, text)
+    };
 
-    progress
-        .total
-        .store(est_frames.min(u32::MAX as usize) as u32, Ordering::Relaxed);
-    let mut stdout = child.stdout.take().ok_or("ffmpeg: no stdout pipe")?;
+    progress.total.store(
+        est_frames.min(u64::from(u32::MAX)) as u32,
+        Ordering::Relaxed,
+    );
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = finish(&mut child);
+        return Err(PredecodeError::Failed("ffmpeg: no stdout pipe".into()));
+    };
 
-    let mut frames = Vec::with_capacity(est_frames);
-    let mut delays_ms = Vec::with_capacity(est_frames);
+    let reserve = est_frames.min(budget_frames) as usize;
+    let mut frames = Vec::with_capacity(reserve);
+    let mut delays_ms = Vec::with_capacity(reserve);
     let mut buf = vec![0u8; frame_size];
 
     while stdout.read_exact(&mut buf).is_ok() {
         if progress.cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
-            let _ = child.wait();
-            return Err("cancelled".to_string());
+            let _ = finish(&mut child);
+            return Err(PredecodeError::Failed("cancelled".to_string()));
+        }
+        if frames.len() as u64 >= budget_frames {
+            let _ = child.kill();
+            let _ = finish(&mut child);
+            return Err(PredecodeError::OverBudget(format!(
+                "pre-decoding went past the {} MiB budget at frame {} ({PREDECODE_MAX_MB_ENV})",
+                budget_bytes >> 20,
+                frames.len() + 1,
+            )));
         }
         frames.push(DecodedFrame {
             data: buf.clone(),
@@ -168,24 +199,30 @@ pub fn decode_all_frames(
         delays_ms.push(delay_ms.max(1));
         progress.done.fetch_add(1, Ordering::Relaxed);
     }
+    drop(stdout);
 
-    let _ = child.wait();
-
+    let (status, stderr) = finish(&mut child);
+    let exit_code = status.and_then(|s| s.code());
     if frames.is_empty() {
-        return Err("ffmpeg decoded zero frames".to_string());
+        return Err(PredecodeError::Failed(zero_frames_error(
+            exit_code, &stderr,
+        )));
+    }
+    if status.is_some_and(|s| !s.success()) {
+        log::warn!(
+            "ffmpeg exited with {status:?} after {} frames: {stderr}",
+            frames.len()
+        );
     }
 
     log::info!(
         "Decoded {} video frames ({}MB)",
         frames.len(),
-        (frames.len() * frame_size) / (1024 * 1024),
+        (frames.len() as u64 * frame_bytes) >> 20,
     );
 
     Ok((frames, delays_ms))
 }
-
-/// Maximum video duration (seconds) we'll pre-decode. Beyond this, reject.
-pub const MAX_PREDECODE_SECS: f64 = 60.0;
 
 /// Everything a video source needs, in one call: the ffmpeg check, the probe,
 /// the pre-decode length cap and the decode itself, reporting through
@@ -207,12 +244,11 @@ pub fn decode_video(
         meta.fps,
         meta.duration_secs,
     );
-    if meta.duration_secs > MAX_PREDECODE_SECS {
+    let budget = predecode_budget_bytes();
+    if let Some(why) = predecode_refusal(&meta, MAX_PREDECODE_SECS, budget) {
         return Err(format!(
-            "Video too long for pre-decode ({:.0}s > {:.0}s max). \
-             Use a shorter clip or trim with ffmpeg.",
-            meta.duration_secs, MAX_PREDECODE_SECS,
+            "Video too large to pre-decode: {why}. Use a shorter or smaller clip."
         ));
     }
-    decode_all_frames(path, &meta, progress)
+    decode_all_frames(path, &meta, progress, budget).map_err(String::from)
 }
