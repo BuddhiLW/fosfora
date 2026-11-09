@@ -233,6 +233,16 @@ impl ParticleSourceLoader {
         })
     }
 
+    /// Hand a chosen 3D model path to the drain, as the model dialog does.
+    pub fn load_model(&mut self, path: PathBuf, request: SourceRequest) -> std::io::Result<()> {
+        let name = file_name(&path);
+        self.start("particle-source-loader", name, request, move |_| {
+            Some(ParticleSourceResult::Model {
+                path: path.to_string_lossy().to_string(),
+            })
+        })
+    }
+
     /// Open a file dialog for images on a background thread, then decode.
     /// The dialog + decode both run off the main thread to avoid freezing.
     #[cfg(feature = "desktop")]

@@ -1597,21 +1597,14 @@ impl ApplicationHandler for FosforaApp {
                     app.settings.save();
                 }
 
-                // Handle particle quality change from settings panel
+                // Handle particle quality change from settings panel (reloads the
+                // active effect to rebuild its particle buffers)
                 let set_quality: Option<crate::settings::ParticleQuality> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_particle_quality")));
                 if let Some(quality) = set_quality {
-                    app.settings.particle_quality = quality;
-                    app.settings.save();
-                    // Reload active effect to rebuild particle system with new buffer size
-                    let active = app.layer_stack.active_layer;
-                    if let Some(layer) = app.layer_stack.layers.get(active) {
-                        if let Some(effect_idx) = layer.effect_index() {
-                            app.load_effect_on_layer(active, effect_idx);
-                        }
-                    }
+                    app.set_particle_quality(quality);
                 }
 
                 // Handle band-scale change from settings panel (A1 #1452)
@@ -2646,19 +2639,9 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("lattice_cmd")));
                     if let Some(cmd) = lattice_cmd {
-                        app.preset_store.mark_dirty();
-                        let device = app.gpu.device.clone();
-                        let hdr = crate::gpu::GpuContext::hdr_format();
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(ps) = &mut e.pass_executor.particle_system {
-                                    ps.lattice_params = cmd.params;
-                                    ps.init_lattice(&device, hdr);
-                                    if cmd.reseed {
-                                        ps.request_lattice_seed();
-                                    }
-                                }
-                            }
+                        let layer = app.layer_stack.active_layer;
+                        if let Err(e) = app.apply_lattice(layer, cmd.params, cmd.reseed) {
+                            log::debug!("Lattice: {e}");
                         }
                     }
                 }
@@ -2672,245 +2655,48 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("helix_cmd")));
                     if let Some(cmd) = helix_cmd {
-                        app.preset_store.mark_dirty();
-                        let device = app.gpu.device.clone();
-                        let hdr = crate::gpu::GpuContext::hdr_format();
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(ps) = &mut e.pass_executor.particle_system {
-                                    ps.helix_params = cmd.params;
-                                    ps.init_helix(&device, hdr);
-                                }
-                            }
+                        let layer = app.layer_stack.active_layer;
+                        if let Err(e) = app.apply_helix(layer, cmd.params) {
+                            log::debug!("Helix: {e}");
                         }
                     }
                 }
 
-                // Handle obstacle panel signals
+                // Handle obstacle panel signals. Image and model loads come back
+                // as a file dialog for the window to open.
                 {
                     use crate::ui::panels::obstacle_panel::ObstacleCommand;
-                    #[cfg(feature = "webcam")]
-                    let mut obstacle_start_webcam = false;
-                    #[cfg(feature = "depth")]
-                    let mut obstacle_start_depth = false;
+                    use fosfora_app::control::ops::particle::ObstacleFollowUp;
                     let obstacle_cmd: Option<ObstacleCommand> = app
                         .egui_overlay
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("obstacle_cmd")));
-                    if let Some(cmd) = obstacle_cmd.filter(|c| !matches!(c, ObstacleCommand::None))
-                    {
-                        app.preset_store.mark_dirty();
-                        #[cfg(feature = "video")]
-                        let active_idx = app.layer_stack.active_layer;
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(ps) = &mut e.pass_executor.particle_system {
-                                    match cmd {
-                                        ObstacleCommand::SetEnabled(en) => {
-                                            ps.obstacle_enabled = en;
-                                        }
-                                        ObstacleCommand::SetMode(mode) => {
-                                            ps.obstacle_mode = mode;
-                                        }
-                                        ObstacleCommand::SetFit(fit) => {
-                                            ps.obstacle_fit = fit;
-                                        }
-                                        ObstacleCommand::SetThreshold(t) => {
-                                            ps.obstacle_threshold = t;
-                                        }
-                                        ObstacleCommand::SetElasticity(e_val) => {
-                                            ps.obstacle_elasticity = e_val;
-                                        }
-                                        ObstacleCommand::LoadImage => {
-                                            // Open file dialog for obstacle image
-                                            if self.obstacle_dialog_rx.is_none() {
-                                                let (tx, rx) = crossbeam_channel::bounded(1);
-                                                self.obstacle_dialog_rx = Some(rx);
-                                                std::thread::Builder::new()
-                                                    .name("obstacle-dialog".into())
-                                                    .spawn(move || {
-                                                        let dialog = rfd::FileDialog::new()
-                                                            .add_filter(
-                                                                "Images",
-                                                                &[
-                                                                    "png", "jpg", "jpeg", "webp",
-                                                                    "bmp",
-                                                                ],
-                                                            );
-                                                        if let Some(path) = dialog.pick_file() {
-                                                            let _ = tx.send(path);
-                                                        }
-                                                    })
-                                                    .ok();
-                                            }
-                                        }
-                                        ObstacleCommand::LoadVideo => {
-                                            // The dialog and the decode both run on the
-                                            // loader's thread; the result lands through
-                                            // the particle source drain (#3159).
-                                            #[cfg(feature = "video")]
-                                            {
-                                                let request = crate::gpu::particle::SourceRequest {
-                                                    layer_idx: active_idx,
-                                                    as_obstacle: true,
-                                                    ..Default::default()
-                                                };
-                                                if let Err(e) = app
-                                                    .particle_source_loader
-                                                    .open_video_dialog(request)
-                                                {
-                                                    log::error!(
-                                                        "Could not open the obstacle video dialog: {e}"
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        ObstacleCommand::LoadModel => {
-                                            // File dialog for a 3D-model obstacle
-                                            // (.glb/.gltf mesh or .ply/.splat cloud, #1851).
-                                            if self.obstacle_dialog_rx.is_none() {
-                                                let (tx, rx) = crossbeam_channel::bounded(1);
-                                                self.obstacle_dialog_rx = Some(rx);
-                                                std::thread::Builder::new()
-                                                    .name("obstacle-model-dialog".into())
-                                                    .spawn(move || {
-                                                        let dialog = rfd::FileDialog::new()
-                                                            .add_filter(
-                                                                "3D model",
-                                                                &["glb", "gltf", "ply", "splat"],
-                                                            );
-                                                        if let Some(path) = dialog.pick_file() {
-                                                            let _ = tx.send(path);
-                                                        }
-                                                    })
-                                                    .ok();
-                                            }
-                                        }
-                                        ObstacleCommand::UseWebcam => {
-                                            // Start webcam capture if not already running
-                                            #[cfg(feature = "webcam")]
-                                            {
-                                                obstacle_start_webcam = true;
-                                                ps.obstacle_enabled = true;
-                                                ps.obstacle_source =
-                                                    Some(gpu::particle::ObstacleSource::Webcam);
-                                                ps.obstacle_image_path = None;
-                                            }
-                                        }
-                                        ObstacleCommand::UseDepth => {
-                                            #[cfg(feature = "depth")]
-                                            {
-                                                if !crate::depth::model::ort_available() {
-                                                    log::error!(
-                                                        "ONNX Runtime not available for depth estimation"
-                                                    );
-                                                } else {
-                                                    obstacle_start_depth = true;
-                                                    ps.obstacle_enabled = true;
-                                                    ps.obstacle_source =
-                                                        Some(gpu::particle::ObstacleSource::Depth);
-                                                    ps.obstacle_image_path = None;
-                                                }
-                                            }
-                                        }
-                                        ObstacleCommand::DownloadDepthModel => {
-                                            #[cfg(feature = "depth")]
-                                            {
-                                                if app.depth_download.is_none()
-                                                    || app
-                                                        .depth_download
-                                                        .as_ref()
-                                                        .map_or(false, |p| !p.is_downloading())
-                                                {
-                                                    app.depth_download =
-                                                        Some(crate::depth::model::download_model());
-                                                    log::info!("Starting depth model download");
-                                                }
-                                            }
-                                        }
-                                        ObstacleCommand::Clear => {
-                                            ps.clear_obstacle(&app.gpu.device, &app.gpu.queue);
-                                            // Stop depth thread when obstacle cleared
-                                            #[cfg(feature = "depth")]
-                                            {
-                                                app.depth_thread = None;
-                                            }
-                                            #[cfg(feature = "webcam")]
-                                            app.cleanup_webcam_if_unused();
-                                        }
-                                        ObstacleCommand::SetWaterEnabled(en) => {
-                                            ps.obstacle_water_enabled = en;
-                                        }
-                                        ObstacleCommand::SetWaterLevel(v) => {
-                                            ps.obstacle_water_params.level_scale = v;
-                                        }
-                                        ObstacleCommand::SetWaterSource(v) => {
-                                            ps.obstacle_water_params.source_rate = v;
-                                        }
-                                        ObstacleCommand::SetWaterDrain(v) => {
-                                            ps.obstacle_water_params.drain = v;
-                                        }
-                                        ObstacleCommand::SetWaterFlux(v) => {
-                                            ps.obstacle_water_params.flux_gain = v;
-                                        }
-                                        ObstacleCommand::SetModelSpin(v) => {
-                                            ps.obstacle_model_spin = v;
-                                        }
-                                        ObstacleCommand::SetModelDisplay(v) => {
-                                            ps.obstacle_model_display = v;
-                                        }
-                                        ObstacleCommand::SetFluidEnabled(en) => {
-                                            ps.obstacle_fluid_enabled = en;
-                                        }
-                                        ObstacleCommand::SetFluidSpeed(v) => {
-                                            ps.obstacle_fluid_params.flow_speed = v;
-                                        }
-                                        ObstacleCommand::SetFluidCoupling(v) => {
-                                            ps.obstacle_fluid_coupling = v;
-                                        }
-                                        ObstacleCommand::SetFluidVorticity(v) => {
-                                            ps.obstacle_fluid_params.vorticity = v;
-                                        }
-                                        ObstacleCommand::SetFluidViscosity(v) => {
-                                            ps.obstacle_fluid_params.viscosity = v;
-                                        }
-                                        ObstacleCommand::SetFluidGrid(g) => {
-                                            ps.obstacle_fluid_grid = g;
-                                        }
-                                        ObstacleCommand::None => {}
+                    let layer = app.layer_stack.active_layer;
+                    match obstacle_cmd.map(|cmd| app.apply_obstacle_command(layer, cmd)) {
+                        None | Some(Ok(ObstacleFollowUp::Done)) => {}
+                        Some(Ok(follow)) if self.obstacle_dialog_rx.is_none() => {
+                            let (title, exts): (&'static str, &'static [&'static str]) =
+                                if follow == ObstacleFollowUp::ModelDialog {
+                                    ("3D model", &["glb", "gltf", "ply", "splat"])
+                                } else {
+                                    ("Images", &["png", "jpg", "jpeg", "webp", "bmp"])
+                                };
+                            let (tx, rx) = crossbeam_channel::bounded(1);
+                            self.obstacle_dialog_rx = Some(rx);
+                            std::thread::Builder::new()
+                                .name("obstacle-dialog".into())
+                                .spawn(move || {
+                                    let dialog = rfd::FileDialog::new().add_filter(title, exts);
+                                    if let Some(path) = dialog.pick_file() {
+                                        let _ = tx.send(path);
                                     }
-                                }
-                            }
+                                })
+                                .ok();
                         }
-                    }
-                    // Deferred webcam/depth starts (outside mutable layer_stack borrow)
-                    #[cfg(feature = "webcam")]
-                    if obstacle_start_webcam {
-                        if let Err(e) = app.ensure_default_webcam() {
-                            log::error!("Failed to start webcam for obstacle: {e}");
-                            app.status_error =
-                                Some((format!("Webcam failed: {e}"), std::time::Instant::now()));
-                        }
-                    }
-                    #[cfg(feature = "depth")]
-                    if obstacle_start_depth {
-                        #[cfg(feature = "webcam")]
-                        if let Err(e) = app.ensure_default_webcam() {
-                            log::error!("Failed to start webcam for depth obstacle: {e}");
-                            app.status_error =
-                                Some((format!("Webcam failed: {e}"), std::time::Instant::now()));
-                        }
-                        if app.depth_thread.is_none() {
-                            let model_path = crate::depth::model::model_path();
-                            match crate::depth::thread::DepthThread::start(model_path) {
-                                Ok(dt) => {
-                                    app.depth_thread = Some(dt);
-                                    log::info!("Depth estimation thread started");
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to start depth thread: {e}");
-                                }
-                            }
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => {
+                            log::error!("Obstacle: {e}");
+                            app.status_error = Some((e, std::time::Instant::now()));
                         }
                     }
                 }
@@ -2922,90 +2708,24 @@ impl ApplicationHandler for FosforaApp {
                         d.remove_temp(egui::Id::new("switch_obstacle_webcam_device"))
                     });
                     if let Some(new_idx) = switch_obs_device {
-                        // The previous camera keeps running until the new
-                        // one is, so a camera that fails to open changes
-                        // nothing.
-                        let started = app
-                            .webcam_device_name(new_idx)
-                            .ok_or_else(|| "Camera is no longer connected".to_string())
-                            .and_then(|name| app.ensure_webcam(&name));
-                        match started {
-                            Ok(_) => {
-                                app.set_default_webcam(new_idx);
-                                app.cleanup_webcam_if_unused();
-                            }
-                            Err(e) => {
-                                log::error!("Failed to switch obstacle webcam device: {e}");
-                                app.status_error = Some((
-                                    format!("Camera failed: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                                app.refresh_webcam_devices();
-                            }
+                        if let Err(e) = app.switch_obstacle_webcam(new_idx) {
+                            log::error!("Failed to switch obstacle webcam device: {e}");
+                            app.status_error = Some((e, std::time::Instant::now()));
                         }
                     }
                 }
 
                 // Drain obstacle file dialog result (non-blocking)
-                if let Some(ref rx) = self.obstacle_dialog_rx {
-                    if let Ok(path) = rx.try_recv() {
-                        self.obstacle_dialog_rx = None;
-                        let ext = path
-                            .extension()
-                            .map(|e| e.to_string_lossy().to_lowercase())
-                            .unwrap_or_default();
-                        let is_model = matches!(ext.as_str(), "glb" | "gltf" | "ply" | "splat");
-                        if is_model {
-                            let path_str = path.to_string_lossy().to_string();
-                            if let Some(layer) = app.layer_stack.active_mut() {
-                                if let Some(e) = layer.as_effect_mut() {
-                                    if let Some(ps) = &mut e.pass_executor.particle_system {
-                                        if let Err(err) =
-                                            ps.set_obstacle_model(&app.gpu.device, &path)
-                                        {
-                                            log::error!("Failed to load obstacle model: {err}");
-                                            app.status_error = Some((
-                                                format!("Model load failed: {err}"),
-                                                std::time::Instant::now(),
-                                            ));
-                                        } else {
-                                            log::info!("Loaded obstacle model: {path_str}");
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            match image::open(&path) {
-                                Ok(img) => {
-                                    let rgba = img.to_rgba8();
-                                    let (w, h) = rgba.dimensions();
-                                    let path_str = path.to_string_lossy().to_string();
-                                    if let Some(layer) = app.layer_stack.active_mut() {
-                                        if let Some(e) = layer.as_effect_mut() {
-                                            if let Some(ps) = &mut e.pass_executor.particle_system {
-                                                ps.set_obstacle_image(
-                                                    &app.gpu.device,
-                                                    &app.gpu.queue,
-                                                    &rgba,
-                                                    w,
-                                                    h,
-                                                    Some(path_str),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => log::error!("Failed to load obstacle image: {e}"),
-                            }
-                        }
-                        // Stop depth thread + webcam if switching away from depth/webcam source
-                        #[cfg(feature = "depth")]
-                        {
-                            app.depth_thread = None;
-                        }
-                        #[cfg(feature = "webcam")]
-                        app.cleanup_webcam_if_unused();
-                        app.preset_store.mark_dirty();
+                let picked = self
+                    .obstacle_dialog_rx
+                    .as_ref()
+                    .and_then(|rx| rx.try_recv().ok());
+                if let Some(path) = picked {
+                    self.obstacle_dialog_rx = None;
+                    let layer = app.layer_stack.active_layer;
+                    if let Err(e) = app.load_obstacle_file(layer, &path) {
+                        log::error!("{e}");
+                        app.status_error = Some((e, std::time::Instant::now()));
                     }
                 }
 
@@ -3270,107 +2990,26 @@ impl ApplicationHandler for FosforaApp {
                     }
                 }
 
-                // Handle particle panel signals
+                // Handle particle panel signals (emission params; a user effect's
+                // file is updated too, built-ins stay runtime-only)
                 {
                     let ctx = app.egui_overlay.context();
-                    let emit_rate: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate")));
-                    let burst: Option<u32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst")));
-                    let lifetime: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime")));
-                    let speed: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed")));
-                    let size: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size")));
-                    let drag: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag")));
-                    let trail_length: Option<u32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_trail_length")));
-
-                    let mut particle_save_info: Option<(usize, gpu::particle::types::ParticleDef)> =
-                        None;
-                    if emit_rate.is_some()
-                        || burst.is_some()
-                        || lifetime.is_some()
-                        || speed.is_some()
-                        || size.is_some()
-                        || drag.is_some()
-                        || trail_length.is_some()
-                    {
-                        // Panel edit → preset is now unsaved (particle-sim edits
-                        // round-trip via LayerPreset.particle_sim).
-                        app.preset_store.mark_dirty();
-                        // Needed only by the trail-length branch below, which
-                        // reallocates the trail buffer.
-                        let device = app.gpu.device.clone();
-                        let hdr = crate::gpu::GpuContext::hdr_format();
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(effect) = layer.as_effect_mut() {
-                                let eidx = effect.effect_index;
-                                if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
-                                    if let Some(v) = emit_rate {
-                                        ps.emit_rate = v;
-                                        ps.def.emit_rate = v;
-                                    }
-                                    if let Some(v) = burst {
-                                        ps.burst_on_beat = v;
-                                        ps.def.burst_on_beat = v;
-                                    }
-                                    if let Some(v) = lifetime {
-                                        ps.def.lifetime = v;
-                                    }
-                                    if let Some(v) = speed {
-                                        ps.def.initial_speed = v;
-                                    }
-                                    if let Some(v) = size {
-                                        ps.def.initial_size = v;
-                                    }
-                                    if let Some(v) = drag {
-                                        ps.def.drag = v;
-                                    }
-                                    if let Some(v) = trail_length {
-                                        // Keep def in sync (drives disk-save +
-                                        // preset capture) and reallocate the trail
-                                        // buffer; the per-frame uniform sync then
-                                        // shows the new length live.
-                                        ps.def.trail_length = v;
-                                        ps.set_trail_length(&device, hdr, v);
-                                    }
-                                    if let Some(idx) = eidx {
-                                        particle_save_info = Some((idx, ps.def.clone()));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Persist particle changes to disk for user effects only.
-                    // Built-in effects are runtime-only; users should create a
-                    // preset or copy the effect to persist changes.
-                    if let Some((idx, updated_def)) = particle_save_info {
-                        // Capture failures locally; can't touch app.status_error
-                        // while effect_loader is mutably borrowed.
-                        let mut save_err: Option<String> = None;
-                        if let Some(effect) = app.effect_loader.effects.get_mut(idx) {
-                            if !EffectLoader::is_builtin(effect) {
-                                effect.particles = Some(updated_def);
-                                if let Some(ref path) = effect.source_path {
-                                    if let Ok(json) = serde_json::to_string_pretty(effect) {
-                                        if let Err(e) = std::fs::write(path, json) {
-                                            save_err = Some(e.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(e) = save_err {
-                            log::error!("Effect save failed: {e}");
-                            app.status_error = Some((
-                                format!("Effect save failed: {e}"),
-                                std::time::Instant::now(),
-                            ));
-                        }
+                    let edit = fosfora_app::control::ops::particle::SimEdit {
+                        emit_rate: ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate"))),
+                        burst: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst"))),
+                        lifetime: ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime"))),
+                        speed: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed"))),
+                        size: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size"))),
+                        drag: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag"))),
+                        trail_length: ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_trail_length"))),
+                    };
+                    let layer = app.layer_stack.active_layer;
+                    if let Err(e) = app.apply_particle_sim(layer, &edit) {
+                        log::error!("{e}");
+                        app.status_error = Some((e, std::time::Instant::now()));
                     }
                 }
 
@@ -3379,60 +3018,36 @@ impl ApplicationHandler for FosforaApp {
                     let ctx = app.egui_overlay.context();
                     // The layer asking is the one live NOW, not whichever is active
                     // when the dialog returns (#2012).
-                    let base_request = crate::gpu::particle::SourceRequest {
-                        layer_idx: app.layer_stack.active_layer,
-                        ..Default::default()
-                    };
+                    let layer = app.layer_stack.active_layer;
 
-                    // Select built-in raster image
-                    let select_builtin: Option<String> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_select_builtin")));
-                    if let Some(name) = select_builtin {
-                        if !app.particle_source_loader.is_loading() {
-                            let path = crate::gpu::particle::builtin_raster_path(&name);
-                            if let Err(e) =
-                                app.particle_source_loader.load_image(path, base_request)
-                            {
-                                log::error!("Failed to spawn particle source loader thread: {e}");
-                            }
-                            app.preset_store.mark_dirty();
-                        }
-                    }
-
-                    // Load image as particle source (dialog + decode on background thread)
-                    let load_image: Option<bool> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_image")));
-                    if load_image.is_some() && !app.particle_source_loader.is_loading() {
-                        if let Err(e) = app.particle_source_loader.open_image_dialog(base_request) {
-                            log::error!("Failed to spawn particle source dialog thread: {e}");
-                        }
-                        app.preset_store.mark_dirty();
-                    }
-
-                    // Load video as particle source (dialog + decode on background thread)
-                    #[cfg(feature = "video")]
+                    // Source picks: a built-in picture, or a file dialog.
                     {
+                        use fosfora_app::control::ops::particle::{MediaKind, SourceLoad};
+                        let select_builtin: Option<String> = ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_select_builtin")));
+                        let load_image: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_image")));
+                        #[cfg(feature = "video")]
                         let load_video: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_video")));
-                        if load_video.is_some() && !app.particle_source_loader.is_loading() {
-                            if let Err(e) =
-                                app.particle_source_loader.open_video_dialog(base_request)
-                            {
-                                log::error!("Failed to spawn particle source dialog thread: {e}");
+                        #[cfg(not(feature = "video"))]
+                        let load_video: Option<bool> = None;
+                        let load_model: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_model")));
+                        let file = |v: Option<bool>, kind| {
+                            v.map(|_| SourceLoad::File { kind, path: None })
+                        };
+                        let picks = [
+                            select_builtin.map(SourceLoad::Builtin),
+                            file(load_image, MediaKind::Image),
+                            file(load_video, MediaKind::Video),
+                            file(load_model, MediaKind::Model),
+                        ];
+                        for load in picks.into_iter().flatten() {
+                            if let Err(e) = app.load_particle_source(layer, load) {
+                                log::error!("Particle source: {e}");
                             }
-                            app.preset_store.mark_dirty();
                         }
-                    }
-
-                    // Load a 3D model as particle source (#1993). Dialog only on the
-                    // background thread; the raster happens where the device lives.
-                    let load_model: Option<bool> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_model")));
-                    if load_model.is_some() && !app.particle_source_loader.is_loading() {
-                        if let Err(e) = app.particle_source_loader.open_model_dialog(base_request) {
-                            log::error!("Failed to spawn particle source dialog thread: {e}");
-                        }
-                        app.preset_store.mark_dirty();
                     }
 
                     // Model pose changed — re-raster and re-sample the live model.
@@ -3440,86 +3055,39 @@ impl ApplicationHandler for FosforaApp {
                     // per adjustment rather than once per drag frame.
                     let model_pose: Option<[f32; 9]> =
                         ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_model_pose")));
-                    if let Some(pose) = model_pose {
-                        let def = crate::gpu::particle::types::ModelSampleDef {
-                            yaw_degrees: pose[0],
-                            pitch_degrees: pose[1],
-                            scale: pose[2],
-                            ambient: pose[3],
-                            light_mix: pose[4],
-                            light_x: pose[5],
-                            light_y: pose[6],
-                            light_z: pose[7],
-                            ray_strength: pose[8],
+                    if let Some(p) = model_pose {
+                        let pose = crate::gpu::particle::types::ModelSampleDef {
+                            yaw_degrees: p[0],
+                            pitch_degrees: p[1],
+                            scale: p[2],
+                            ambient: p[3],
+                            light_mix: p[4],
+                            light_x: p[5],
+                            light_y: p[6],
+                            light_z: p[7],
+                            ray_strength: p[8],
                         };
-                        let (device, queue) = (&app.gpu.device, &app.gpu.queue);
-                        if let Some(ps) = app
-                            .layer_stack
-                            .active_mut()
-                            .and_then(|l| l.as_effect_mut())
-                            .and_then(|e| e.pass_executor.particle_system.as_mut())
-                        {
-                            // Only a live model source re-samples on a pose change. A
-                            // stale path here is what put the model back over a picture
-                            // the user had just loaded (#2011).
-                            if let crate::gpu::particle::ParticleSource::Model { path } = &ps.source
-                            {
-                                let path = path.clone();
-                                match ps.apply_model_source(
-                                    device,
-                                    queue,
-                                    std::path::Path::new(&path),
-                                    &def,
-                                ) {
-                                    Ok(n) => {
-                                        log::info!("Re-sampled model at new pose: {n} particles");
-                                    }
-                                    Err(e) => log::warn!("Model re-sample failed: {e}"),
-                                }
-                            }
+                        match app.set_particle_model_pose(layer, &pose) {
+                            Ok(n) => log::info!("Re-sampled model at new pose: {n} particles"),
+                            Err(e) => log::warn!("Model re-sample failed: {e}"),
                         }
-                        app.preset_store.mark_dirty();
                     }
 
                     // Splat scene picker + demo download (#1800)
                     {
                         let load_scene: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("splat_load_scene")));
-                        if load_scene.is_some() && !app.splat_loader.loading {
-                            // The runtime override lives in ParticleSystem
-                            // state (the .pfx stays read-only); the load
-                            // needs the active layer's splat transform.
-                            let job = app
-                                .layer_stack
-                                .active()
-                                .and_then(|l| l.as_effect())
-                                .and_then(|e| e.pass_executor.particle_system.as_ref())
-                                .and_then(|ps| {
-                                    ps.def.splat.as_ref().map(|s| {
-                                        (
-                                            ps.max_particles,
-                                            crate::gpu::particle::splat_source::SceneOptions::from(
-                                                s,
-                                            ),
-                                        )
-                                    })
-                                });
-                            if let Some((target, opts)) = job {
-                                app.splat_loader.open_dialog(
-                                    target,
-                                    opts,
-                                    app.layer_stack.active_layer,
-                                );
-                                app.preset_store.mark_dirty();
+                        if load_scene.is_some() {
+                            if let Err(e) = app.splat_load_scene(layer, None) {
+                                log::warn!("Splat scene: {e}");
                             }
                         }
-
                         let dl_demo: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("splat_download_demo")));
-                        if dl_demo.is_some() && app.splat_demo_download.is_none() {
-                            app.splat_demo_download = Some(
-                                crate::gpu::particle::splat_source::download_demo_scene("default"),
-                            );
+                        if dl_demo.is_some() {
+                            if let Err(e) = app.splat_download_demo() {
+                                log::info!("Splat demo: {e}");
+                            }
                         }
                     }
 
@@ -3578,343 +3146,94 @@ impl ApplicationHandler for FosforaApp {
                             .data_mut(|d| d.remove_temp(egui::Id::new("particle_webcam_device")));
                         if use_webcam.is_some() || device.is_some() {
                             let layer = app.layer_stack.active_layer;
-                            if let Err(e) = app.set_particle_webcam(layer, device) {
+                            if let Err(e) = app.use_particle_webcam(layer, device) {
                                 log::error!("Failed to start webcam: {e}");
                                 app.status_error = Some((
                                     format!("Webcam failed: {e}"),
                                     std::time::Instant::now(),
                                 ));
                             }
-                            app.cleanup_webcam_if_unused();
-                            app.preset_store.mark_dirty();
                         }
                     }
 
                     // Video transport controls
                     #[cfg(feature = "video")]
                     {
-                        let playing: Option<bool> = ctx
-                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_playing")));
-                        let looping: Option<bool> = ctx
-                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_looping")));
-                        let speed: Option<f32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_video_speed")));
-                        let seek: Option<f64> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_video_seek")));
-                        if playing.is_some()
-                            || looping.is_some()
-                            || speed.is_some()
-                            || seek.is_some()
-                        {
-                            if let Some(layer) = app.layer_stack.active_mut() {
-                                if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
-                                    {
-                                        if let Some(playback) = ps.source.playback_mut() {
-                                            if let Some(v) = playing {
-                                                playback.playing = v;
-                                            }
-                                            if let Some(v) = looping {
-                                                playback.looping = v;
-                                            }
-                                            if let Some(v) = speed {
-                                                playback.speed = v;
-                                            }
-                                        }
-                                        if let Some(v) = seek {
-                                            ps.source.seek_to_secs(v);
-                                        }
-                                    }
-                                }
-                            }
-                            if looping.is_some() || speed.is_some() {
-                                app.preset_store.mark_dirty();
+                        let edit = fosfora_app::control::ops::particle::VideoEdit {
+                            playing: ctx.data_mut(|d| {
+                                d.remove_temp(egui::Id::new("particle_video_playing"))
+                            }),
+                            looping: ctx.data_mut(|d| {
+                                d.remove_temp(egui::Id::new("particle_video_looping"))
+                            }),
+                            speed: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_speed"))),
+                            seek: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_seek"))),
+                        };
+                        if !edit.is_empty() {
+                            let layer = app.layer_stack.active_layer;
+                            if let Err(e) = app.edit_particle_video(layer, &edit) {
+                                log::debug!("Particle video: {e}");
                             }
                         }
                     }
 
-                    // Morph controls
+                    // Morph controls: one frame of panel edits, applied by
+                    // App::apply_morph (also the particle/morph-* ops).
                     {
-                        let morph_trigger: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_trigger_target")));
-                        let morph_cycle: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_auto_cycle")));
-                        let morph_hold: Option<f32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_hold_duration")));
-                        let morph_style: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_style")));
-                        let morph_load_img: Option<bool> =
+                        use fosfora_app::control::ops::particle::{MediaKind, MorphEdit};
+                        let flag = |v: Option<bool>| v.is_some();
+                        let mut edit = MorphEdit {
+                            trigger: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_trigger_target"))),
+                            auto_cycle: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_auto_cycle"))),
+                            hold: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_hold_duration"))),
+                            style: ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_style"))),
+                            set_source: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_set_source"))),
+                            blend: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_manual_blend"))),
+                            clear_slot: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_clear_slot"))),
+                            add_geometry: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_add_geometry"))),
+                            add_text: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_add_text"))),
+                            snapshot: flag(
+                                ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_snapshot"))),
+                            ),
+                            load: None,
+                        };
+                        let load_image: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_image")));
-                        let morph_add_geo: Option<String> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_add_geometry")));
-                        let morph_add_text: Option<String> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_add_text")));
-                        let morph_load_video: Option<bool> =
+                        let load_video: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_video")));
-                        let morph_load_model: Option<bool> =
+                        let load_model: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_model")));
-                        let morph_snapshot: Option<bool> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_snapshot")));
-                        let morph_clear_slot: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_clear_slot")));
-                        let morph_manual_blend: Option<f32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_manual_blend")));
-                        let morph_set_source: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_set_source")));
-                        // Read the selected slot for targeting (don't remove — UI manages it)
-                        let morph_selected_slot: Option<u32> =
+                        edit.load = [
+                            (load_image, MediaKind::Image),
+                            (load_video, MediaKind::Video),
+                            (load_model, MediaKind::Model),
+                        ]
+                        .into_iter()
+                        .find(|(v, _)| v.is_some())
+                        .map(|(_, kind)| (kind, None));
+                        // The selected slot is the UI's; it is cleared once used.
+                        let selected: Option<u32> =
                             ctx.data(|d| d.get_temp(egui::Id::new("morph_selected_slot")));
-
-                        if morph_trigger.is_some()
-                            || morph_cycle.is_some()
-                            || morph_hold.is_some()
-                            || morph_style.is_some()
-                            || morph_load_img.is_some()
-                            || morph_add_geo.is_some()
-                            || morph_add_text.is_some()
-                            || morph_load_video.is_some()
-                            || morph_load_model.is_some()
-                            || morph_snapshot.is_some()
-                            || morph_clear_slot.is_some()
-                            || morph_manual_blend.is_some()
-                            || morph_set_source.is_some()
-                        {
-                            if let Some(layer) = app.layer_stack.active_mut() {
-                                if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
-                                    {
-                                        let needs_upload = if let Some(ref mut morph) =
-                                            ps.morph_state
-                                        {
-                                            if let Some(target) = morph_trigger {
-                                                morph.trigger_morph(target);
-                                            }
-                                            if let Some(mode) = morph_cycle {
-                                                morph.auto_cycle = match mode {
-                                                    0 => crate::gpu::particle::morph::AutoCycle::Off,
-                                                    1 => crate::gpu::particle::morph::AutoCycle::OnBeat,
-                                                    _ => crate::gpu::particle::morph::AutoCycle::Timed(4.0),
-                                                };
-                                            }
-                                            if let Some(hold) = morph_hold {
-                                                morph.hold_duration = hold;
-                                            }
-                                            if let Some(style) = morph_style {
-                                                morph.transition_style = style;
-                                            }
-                                            if let Some(src) = morph_set_source {
-                                                morph.source_index =
-                                                    src.min(morph.target_count.saturating_sub(1));
-                                            }
-                                            if let Some(progress) = morph_manual_blend {
-                                                // Manual scrub: set progress directly, mark transitioning so shader interpolates
-                                                morph.progress = progress;
-                                                morph.transitioning = progress < 1.0;
-                                                // Reset hold timer so auto-cycle doesn't immediately fire
-                                                morph.hold_timer = 0.0;
-                                            }
-                                            // Helper: pick target slot — selected slot, or next empty (based on def count), or last
-                                            let def_count = ps
-                                                .def
-                                                .morph_targets
-                                                .as_ref()
-                                                .map_or(0, |t| t.len() as u32);
-                                            let pick_slot = || -> u32 {
-                                                if let Some(s) = morph_selected_slot {
-                                                    s.min(3)
-                                                } else {
-                                                    def_count.min(3)
-                                                }
-                                            };
-                                            let mut needs_upload = false;
-
-                                            // Clear slot — shift data + labels to fill the gap
-                                            if let Some(clear) = morph_clear_slot {
-                                                let slot = clear.min(3);
-                                                morph.remove_target(slot);
-                                                if let Some(ref mut targets) = ps.def.morph_targets
-                                                {
-                                                    if (slot as usize) < targets.len() {
-                                                        targets.remove(slot as usize);
-                                                    }
-                                                }
-                                                needs_upload = true;
-                                            }
-
-                                            if let Some(shape) = morph_add_geo {
-                                                let slot = pick_slot();
-                                                let data =
-                                                    crate::gpu::particle::morph::generate_geometry(
-                                                        &shape,
-                                                        ps.max_particles,
-                                                        ps.def.initial_size,
-                                                    );
-                                                morph.load_target(slot, data);
-                                                let def =
-                                                    crate::gpu::particle::types::MorphTargetDef {
-                                                        source: format!("geometry:{}", shape),
-                                                        color: None,
-                                                    };
-                                                if let Some(ref mut targets) = ps.def.morph_targets
-                                                {
-                                                    while targets.len() <= slot as usize {
-                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
-                                                            source: String::new(), color: None,
-                                                        });
-                                                    }
-                                                    targets[slot as usize] = def;
-                                                }
-                                                needs_upload = true;
-                                            }
-                                            if let Some(ref text) = morph_add_text {
-                                                let slot = pick_slot();
-                                                let data = crate::gpu::particle::text_source::render_text_to_particles(
-                                                    text,
-                                                    ps.max_particles,
-                                                    ps.def.initial_size,
-                                                );
-                                                if !data.is_empty() {
-                                                    morph.load_target(slot, data);
-                                                    let def = crate::gpu::particle::types::MorphTargetDef {
-                                                        source: format!("text:{}", text),
-                                                        color: None,
-                                                    };
-                                                    if let Some(ref mut targets) =
-                                                        ps.def.morph_targets
-                                                    {
-                                                        while targets.len() <= slot as usize {
-                                                            targets.push(crate::gpu::particle::types::MorphTargetDef {
-                                                                source: String::new(), color: None,
-                                                            });
-                                                        }
-                                                        targets[slot as usize] = def;
-                                                    }
-                                                    log::info!(
-                                                        "Loaded morph text target into slot {}: \"{}\"",
-                                                        slot,
-                                                        text
-                                                    );
-                                                    needs_upload = true;
-                                                }
-                                            }
-                                            needs_upload
-                                        } else {
-                                            false
-                                        };
-                                        if needs_upload {
-                                            ps.upload_morph_targets(
-                                                &app.gpu.device,
-                                                &app.gpu.queue,
-                                            );
-                                            ctx.data_mut(|d| {
-                                                d.remove_temp::<u32>(egui::Id::new(
-                                                    "morph_selected_slot",
-                                                ))
-                                            });
-                                        }
-                                        // Snapshot needs &self on ps, so do it outside the morph borrow
-                                        if morph_snapshot.is_some() {
-                                            let slot = if let Some(s) = morph_selected_slot {
-                                                s.min(3)
-                                            } else {
-                                                // Use def count to stay in sync with morph_targets vec
-                                                (ps.def
-                                                    .morph_targets
-                                                    .as_ref()
-                                                    .map_or(0, |t| t.len())
-                                                    as u32)
-                                                    .min(3)
-                                            };
-                                            let data = ps.snapshot_particles(
-                                                &app.gpu.device,
-                                                &app.gpu.queue,
-                                            );
-                                            if !data.is_empty() {
-                                                if let Some(ref mut morph) = ps.morph_state {
-                                                    morph.load_target(slot, data);
-                                                }
-                                                let def =
-                                                    crate::gpu::particle::types::MorphTargetDef {
-                                                        source: "snapshot".to_string(),
-                                                        color: None,
-                                                    };
-                                                if let Some(ref mut targets) = ps.def.morph_targets
-                                                {
-                                                    while targets.len() <= slot as usize {
-                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
-                                                            source: String::new(), color: None,
-                                                        });
-                                                    }
-                                                    targets[slot as usize] = def;
-                                                }
-                                                ps.upload_morph_targets(
-                                                    &app.gpu.device,
-                                                    &app.gpu.queue,
-                                                );
-                                                log::info!(
-                                                    "Loaded morph snapshot into slot {}",
-                                                    slot
-                                                );
-                                            }
-                                            ctx.data_mut(|d| {
-                                                d.remove_temp::<u32>(egui::Id::new(
-                                                    "morph_selected_slot",
-                                                ))
-                                            });
-                                        }
-                                        // "Which layer, which slot, is this a morph
-                                        // target" all ride with the request now, so a
-                                        // layer or slot change while the dialog is open
-                                        // cannot redirect the result (#2012).
-                                        let morph_request = crate::gpu::particle::SourceRequest {
-                                            layer_idx: app.layer_stack.active_layer,
-                                            as_morph_target: true,
-                                            morph_slot: morph_selected_slot,
-                                            ..Default::default()
-                                        };
-                                        let clear_slot = || {
-                                            ctx.data_mut(|d| {
-                                                d.remove_temp::<u32>(egui::Id::new(
-                                                    "morph_selected_slot",
-                                                ))
-                                            });
-                                        };
-                                        if morph_load_img.is_some() {
-                                            clear_slot();
-                                            if let Err(e) = app
-                                                .particle_source_loader
-                                                .open_image_dialog(morph_request)
-                                            {
-                                                log::error!(
-                                                    "Failed to spawn particle source dialog thread: {e}"
-                                                );
-                                            }
-                                        }
-                                        #[cfg(feature = "video")]
-                                        if morph_load_video.is_some() {
-                                            clear_slot();
-                                            if let Err(e) = app
-                                                .particle_source_loader
-                                                .open_video_dialog(morph_request)
-                                            {
-                                                log::error!(
-                                                    "Failed to spawn particle source dialog thread: {e}"
-                                                );
-                                            }
-                                        }
-                                        if morph_load_model.is_some() {
-                                            clear_slot();
-                                            if let Err(e) = app
-                                                .particle_source_loader
-                                                .open_model_dialog(morph_request)
-                                            {
-                                                log::error!(
-                                                    "Failed to spawn particle source dialog thread: {e}"
-                                                );
-                                            }
-                                        }
-                                    }
+                        if !edit.is_empty() {
+                            let layer = app.layer_stack.active_layer;
+                            match app.apply_morph(layer, &edit, selected) {
+                                Ok(true) => {
+                                    ctx.data_mut(|d| {
+                                        d.remove_temp::<u32>(egui::Id::new("morph_selected_slot"))
+                                    });
                                 }
+                                Ok(false) => {}
+                                Err(e) => log::warn!("Morph: {e}"),
                             }
                         }
                     }
