@@ -227,3 +227,20 @@ fn a_preset_saved_over_nrepl_lists_and_deletes() {
     repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
     assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
 }
+
+#[test]
+fn a_layer_opacity_set_over_nrepl_reads_back_and_is_restored() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    assert_ne!(repl.eval("(count (layer/ls))").unwrap(), "0");
+    let e = repl.eval("(layer/blend! nil :no-such-blend)").unwrap_err();
+    assert!(e.contains("no blend mode"), "{e}");
+    if repl.eval("(:locked (layer/get-layer))").unwrap() == "true" {
+        return;
+    }
+    let before = repl.eval("(:opacity (layer/get-layer))").unwrap();
+    assert_eq!(repl.eval("(:opacity (layer/opacity! nil 0.25))").unwrap(), "0.25");
+    repl.eval(&format!("(layer/opacity! nil {before})")).unwrap();
+}

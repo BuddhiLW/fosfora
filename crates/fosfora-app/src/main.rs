@@ -1342,26 +1342,8 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("open_shader_editor")));
                 if open_editor.is_some() {
-                    // Resolve active layer's shader path
-                    if let Some(idx) = app.layer_stack.active().and_then(|l| l.effect_index()) {
-                        if let Some(effect) = app.effect_loader.effects.get(idx).cloned() {
-                            let passes = effect.normalized_passes();
-                            if let Some(pass) = passes.first() {
-                                let path = app.effect_loader.resolve_shader_path(&pass.shader);
-                                if let Ok(content) = std::fs::read_to_string(&path) {
-                                    app.shader_editor.open_file(&effect.name, path, content);
-                                    // Load paired .pfx file for tab switching
-                                    if let Some(ref pfx_path) = effect.source_path {
-                                        if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
-                                            app.shader_editor
-                                                .load_paired_pfx(pfx_path.clone(), pfx_content);
-                                        }
-                                    }
-                                } else {
-                                    log::error!("Could not read shader: {}", path.display());
-                                }
-                            }
-                        }
+                    if let Err(e) = app.shader_editor_open(app.layer_stack.active_layer) {
+                        log::warn!("Shader editor: {e}");
                     }
                 }
 
@@ -1370,38 +1352,9 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("shader_editor_save")));
                 if save_editor.is_some() {
-                    // Save the active tab
-                    if let Some(ref path) = app.shader_editor.file_path {
-                        match std::fs::write(path, &app.shader_editor.code) {
-                            Ok(()) => {
-                                app.shader_editor.disk_content = app.shader_editor.code.clone();
-                                log::info!("Saved shader: {}", path.display());
-                            }
-                            Err(e) => {
-                                log::error!("Failed to save shader: {e}");
-                                app.status_error =
-                                    Some((format!("Save failed: {e}"), std::time::Instant::now()));
-                            }
-                        }
-                    }
-                    // Also save the paired tab if it has unsaved changes
-                    if app.shader_editor.paired_is_dirty() {
-                        if let Some(ref paired_path) = app.shader_editor.paired_path {
-                            match std::fs::write(paired_path, &app.shader_editor.paired_content) {
-                                Ok(()) => {
-                                    app.shader_editor.paired_disk_content =
-                                        app.shader_editor.paired_content.clone();
-                                    log::info!("Saved paired file: {}", paired_path.display());
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to save paired file: {e}");
-                                    app.status_error = Some((
-                                        format!("Save failed: {e}"),
-                                        std::time::Instant::now(),
-                                    ));
-                                }
-                            }
-                        }
+                    if let Err(e) = app.shader_editor_save() {
+                        app.status_error =
+                            Some((format!("Save failed: {e}"), std::time::Instant::now()));
                     }
                 }
 
@@ -1456,33 +1409,9 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("delete_effect")));
                 if let Some(idx) = delete_effect {
-                    match app.effect_loader.delete_effect(idx) {
-                        Ok(name) => {
-                            log::info!("Deleted effect: {name}");
-                            // A deleted effect can't stay pinned
-                            if let Some(pos) = app
-                                .settings
-                                .favorite_effects
-                                .iter()
-                                .position(|f| *f == name)
-                            {
-                                app.settings.favorite_effects.remove(pos);
-                                app.settings.save();
-                            }
-                            // Close shader editor if it was editing the deleted effect
-                            if app.shader_editor.open {
-                                app.shader_editor.open = false;
-                            }
-                            // Fix up current_effect after rescan
-                            // The active layer's effect_index refers to the old list,
-                            // so just clear it — the effect stays rendered but is gone from panel
-                            app.effect_loader.current_effect = None;
-                        }
-                        Err(e) => {
-                            log::error!("Failed to delete effect: {e}");
-                            app.status_error =
-                                Some((format!("Delete failed: {e}"), std::time::Instant::now()));
-                        }
+                    if let Err(e) = app.effect_delete(idx) {
+                        app.status_error =
+                            Some((format!("Delete failed: {e}"), std::time::Instant::now()));
                     }
                 }
 
@@ -1492,17 +1421,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("toggle_favorite_effect")));
                 if let Some(name) = toggle_fav {
-                    if let Some(pos) = app
-                        .settings
-                        .favorite_effects
-                        .iter()
-                        .position(|f| *f == name)
-                    {
-                        app.settings.favorite_effects.remove(pos);
-                    } else {
-                        app.settings.favorite_effects.push(name);
-                    }
-                    app.settings.save();
+                    app.effect_set_favorite(&name, None);
                 }
 
                 let create_effect: Option<String> = app
@@ -1796,33 +1715,12 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("set_ffmpeg_webcam")));
                     if let Some(use_ffmpeg) = set_ffmpeg {
-                        if use_ffmpeg && !crate::media::webcam_ffmpeg::ffmpeg_available() {
-                            app.status_error = Some((
-                                "FFmpeg not found in PATH. Install FFmpeg to use this feature."
-                                    .into(),
-                                std::time::Instant::now(),
-                            ));
-                        } else {
-                            // Stop any active capture
-                            app.webcam_captures.clear();
-                            app.use_ffmpeg_webcam = use_ffmpeg;
-                            app.settings.use_ffmpeg_webcam = use_ffmpeg;
-                            app.settings.save();
-                            // Refresh device list with new backend
-                            app.refresh_webcam_devices();
-                            app.start_rtmp_streams();
-                            let backend = if use_ffmpeg { "FFmpeg" } else { "native" };
-                            let device_count = app.webcam_devices.len();
-                            log::info!(
-                                "Webcam backend switched to {backend}, {device_count} device(s) found"
-                            );
-                            app.status_error = Some((
-                                format!(
-                                    "Webcam: {backend} backend, {device_count} device(s) found"
-                                ),
-                                std::time::Instant::now(),
-                            ));
-                        }
+                        let backend = if use_ffmpeg { "FFmpeg" } else { "native" };
+                        let msg = app.webcam_set_ffmpeg(use_ffmpeg).map_or_else(
+                            |e| e,
+                            |n| format!("Webcam: {backend} backend, {n} device(s) found"),
+                        );
+                        app.status_error = Some((msg, std::time::Instant::now()));
                     }
                 }
 
@@ -2256,11 +2154,8 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("pending_effect")));
                 if let Some(idx) = pending.or(app.egui_overlay.pending_effect_load.take()) {
-                    let active_locked = app.layer_stack.active().map_or(false, |l| l.locked);
-                    if !active_locked {
-                        app.load_effect(idx);
-                        app.preset_store.mark_dirty();
-                    }
+                    // A locked layer refuses; the click does nothing.
+                    let _ = app.layer_load_effect(app.layer_stack.active_layer, idx);
                 }
 
                 // A catalog effect dropped on the stack, or added from its
@@ -3123,18 +3018,8 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("add_webcam_layer")));
                     if add_webcam.is_some() {
-                        // Listed afresh, so a camera plugged in (or a virtual
-                        // camera started) since launch can be added.
-                        app.refresh_webcam_devices();
-                        match app.webcam_for_new_layer() {
-                            Some(name) => {
-                                app.add_webcam_layer(&name);
-                                app.preset_store.mark_dirty();
-                            }
-                            None => {
-                                app.status_error =
-                                    Some(("No camera found".into(), std::time::Instant::now()));
-                            }
+                        if let Err(e) = app.webcam_add_layer(None) {
+                            app.status_error = Some((e, std::time::Instant::now()));
                         }
                     }
 
@@ -3145,37 +3030,9 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("switch_webcam_device")));
                     if let Some(new_idx) = switch_device {
-                        let started = app
-                            .webcam_device_name(new_idx)
-                            .ok_or_else(|| "Camera is no longer connected".to_string())
-                            .and_then(|name| app.ensure_webcam(&name).map(|_| name));
-                        match started {
-                            Ok(device_name) => {
-                                if let Some(m) = app
-                                    .layer_stack
-                                    .active_mut()
-                                    .and_then(|l| l.as_media_mut())
-                                    .filter(|m| m.is_live())
-                                {
-                                    m.set_live_device(&device_name);
-                                }
-                                // The pick becomes the default camera too,
-                                // unless that would move a particle source
-                                // or an obstacle to another camera.
-                                if !app.default_webcam_in_use() {
-                                    app.set_default_webcam(new_idx);
-                                }
-                                app.cleanup_webcam_if_unused();
-                                app.preset_store.mark_dirty();
-                            }
-                            Err(e) => {
-                                log::error!("Failed to switch webcam device: {e}");
-                                app.status_error = Some((
-                                    format!("Camera failed: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                                app.refresh_webcam_devices();
-                            }
+                        if let Err(e) = app.webcam_switch(app.layer_stack.active_layer, new_idx) {
+                            app.status_error =
+                                Some((format!("Camera failed: {e}"), std::time::Instant::now()));
                         }
                     }
 
@@ -3184,11 +3041,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("webcam_mirror")));
                     if let Some(mirror) = webcam_mirror {
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(m) = layer.as_media_mut() {
-                                m.set_mirror(&app.gpu.queue, mirror);
-                            }
-                        }
+                        let _ = app.webcam_mirror(app.layer_stack.active_layer, mirror);
                     }
 
                     let webcam_disconnect: Option<bool> = app
@@ -3196,77 +3049,34 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("webcam_disconnect")));
                     if webcam_disconnect.is_some() {
-                        // Remove the active webcam layer; its camera stops
-                        // unless another layer shows it too.
-                        let active = app.layer_stack.active_layer;
-                        app.remove_layer(active);
-                        app.sync_active_layer();
-                        app.cleanup_webcam_if_unused();
-                        app.preset_store.mark_dirty();
+                        // Its camera stops unless another layer shows it too.
+                        let _ = app.layer_remove(app.layer_stack.active_layer);
                     }
                 }
 
-                // Handle media transport signals
-                let play_pause: Option<bool> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_play_pause")));
-                if play_pause.is_some() {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.playing = !m.transport.playing;
-                        }
-                    }
-                }
-                let media_loop: Option<bool> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_loop")));
-                if let Some(looping) = media_loop {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.looping = looping;
-                        }
-                    }
-                }
-                let media_speed: Option<f32> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_speed")));
-                if let Some(speed) = media_speed {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.speed = speed;
-                        }
-                    }
-                }
-                let media_direction: Option<u8> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_direction")));
-                if let Some(dir) = media_direction {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.direction = match dir {
-                                0 => crate::media::types::PlayDirection::Forward,
-                                1 => crate::media::types::PlayDirection::Reverse,
-                                2 => crate::media::types::PlayDirection::PingPong,
-                                _ => crate::media::types::PlayDirection::Forward,
-                            };
-                        }
-                    }
-                }
-
-                // Handle media seek signal (video scrubber)
-                let media_seek: Option<f64> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_seek")));
-                if let Some(secs) = media_seek {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.seek_to_secs(secs);
-                        }
+                // Handle media transport signals (on the active layer)
+                {
+                    use fosfora_app::control::ops::layer::TransportEdit;
+                    use fosfora_app::media::types::PlayDirection;
+                    let ctx = app.egui_overlay.context();
+                    let play_pause: Option<bool> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_play_pause")));
+                    let direction: Option<u8> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_direction")));
+                    let edit = TransportEdit {
+                        toggle: play_pause.is_some(),
+                        looping: ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_loop"))),
+                        speed: ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_speed"))),
+                        direction: direction.map(|dir| match dir {
+                            1 => PlayDirection::Reverse,
+                            2 => PlayDirection::PingPong,
+                            _ => PlayDirection::Forward,
+                        }),
+                        seek_secs: ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_seek"))),
+                        playing: None,
+                    };
+                    if edit != TransportEdit::default() {
+                        let _ = app.media_transport_edit(app.layer_stack.active_layer, &edit);
                     }
                 }
 
@@ -4251,14 +4061,14 @@ impl ApplicationHandler for FosforaApp {
                     }
                 }
 
-                // Handle layer UI signals
+                // Handle layer UI signals (refusals do nothing, as before)
+                use fosfora_app::control::ops::layer::LayerEdit;
                 let add_layer: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("add_layer")));
                 if add_layer.is_some() {
-                    app.add_layer();
-                    app.preset_store.mark_dirty();
+                    let _ = app.layer_add();
                 }
 
                 let remove_layer: Option<usize> = app
@@ -4266,12 +4076,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("remove_layer")));
                 if let Some(idx) = remove_layer {
-                    // App::remove_layer, not layer_stack's — it carries the
-                    // bindings with the renumbering (#2026).
-                    app.remove_layer(idx);
-                    app.preset_store.mark_dirty();
-                    #[cfg(feature = "webcam")]
-                    app.cleanup_webcam_if_unused();
+                    let _ = app.layer_remove(idx);
                 }
 
                 // Handle clear all layers
@@ -4280,10 +4085,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("clear_all_layers")));
                 if clear_all.is_some() {
-                    app.clear_all_layers();
-                    #[cfg(feature = "webcam")]
-                    app.cleanup_webcam_if_unused();
-                    app.preset_store.mark_dirty();
+                    app.layer_clear();
                 }
 
                 // Handle layer rename
@@ -4291,11 +4093,9 @@ impl ApplicationHandler for FosforaApp {
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_rename")));
-                if let Some((idx, new_name)) = layer_rename {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        layer.custom_name = new_name;
-                        app.preset_store.mark_dirty();
-                    }
+                if let Some((idx, name)) = layer_rename {
+                    let edit = LayerEdit { name: Some(name), ..LayerEdit::default() };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
                 let select_layer: Option<usize> = app
@@ -4303,10 +4103,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("select_layer")));
                 if let Some(idx) = select_layer {
-                    if idx < app.layer_stack.layers.len() {
-                        app.layer_stack.active_layer = idx;
-                        app.sync_active_layer();
-                    }
+                    app.layer_select(idx);
                 }
 
                 // The Master row's badge: the canvas, on the master tab.
@@ -4340,10 +4137,8 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_lock")));
                 if let Some((idx, locked)) = toggle_lock {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        layer.locked = locked;
-                        app.preset_store.mark_dirty();
-                    }
+                    let edit = LayerEdit { locked: Some(locked), ..LayerEdit::default() };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
                 let toggle_pin: Option<(usize, bool)> = app
@@ -4351,49 +4146,31 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_pin")));
                 if let Some((idx, pinned)) = toggle_pin {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        layer.pinned = pinned;
-                        app.preset_store.mark_dirty();
-                    }
+                    let edit = LayerEdit { pinned: Some(pinned), ..LayerEdit::default() };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
+                // Blend, opacity and displace act on the active layer.
                 let layer_blend: Option<u32> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_blend")));
-                if let Some(mode_u32) = layer_blend {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if !layer.locked {
-                            layer.blend_mode = BlendMode::from_u32(mode_u32);
-                            app.preset_store.mark_dirty();
-                        }
-                    }
-                }
-
                 let layer_opacity: Option<f32> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_opacity")));
-                if let Some(opacity) = layer_opacity {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if !layer.locked {
-                            layer.opacity = opacity;
-                            app.preset_store.mark_dirty();
-                        }
-                    }
-                }
-
                 let layer_displace: Option<f32> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_displace")));
-                if let Some(amount) = layer_displace {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if !layer.locked {
-                            layer.displace_amount = amount;
-                            app.preset_store.mark_dirty();
-                        }
-                    }
+                let look = LayerEdit {
+                    blend: layer_blend.map(BlendMode::from_u32),
+                    opacity: layer_opacity,
+                    displace: layer_displace,
+                    ..LayerEdit::default()
+                };
+                if look != LayerEdit::default() {
+                    let _ = app.layer_edit(app.layer_stack.active_layer, &look);
                 }
 
                 // The Master inspector's offer: this layer's effect's own
@@ -4403,8 +4180,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("adopt_layer_postprocess")));
                 if let Some(idx) = adopt_pp {
-                    app.adopt_layer_postprocess(idx);
-                    app.preset_store.mark_dirty();
+                    app.postfx_adopt(idx);
                 }
                 // Its other two resets: the settings before the last reset,
                 // and the defaults.
@@ -4428,8 +4204,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_move")));
                 if let Some((from, to)) = layer_move {
-                    app.move_layer(from, to);
-                    app.preset_store.mark_dirty();
+                    app.layer_move(from, to);
                 }
 
                 let toggle_enable: Option<(usize, bool)> = app
@@ -4437,12 +4212,8 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_enable")));
                 if let Some((idx, enabled)) = toggle_enable {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        if !layer.locked {
-                            layer.enabled = enabled;
-                            app.preset_store.mark_dirty();
-                        }
-                    }
+                    let edit = LayerEdit { enabled: Some(enabled), ..LayerEdit::default() };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
                 // Check if active layer params changed (marks preset dirty + schedules .pfx save)
