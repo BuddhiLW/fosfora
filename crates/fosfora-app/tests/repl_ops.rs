@@ -227,3 +227,23 @@ fn a_preset_saved_over_nrepl_lists_and_deletes() {
     repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
     assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
 }
+
+#[test]
+fn system_reads_and_a_reversible_view_toggle_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    let tempo = repl.eval("(sys/tempo)").unwrap();
+    assert!(tempo.contains(":center"), "{tempo}");
+    let triggers = repl.eval("(sys/triggers)").unwrap();
+    assert!(triggers.contains("next-preset"), "{triggers}");
+    assert_eq!(repl.eval("(count (sys/outputs))").unwrap(), "4");
+    let was = repl.eval("(:chain-editor (sys/view))").unwrap();
+    let flipped = repl.eval("(:chain-editor (sys/chain-editor!))").unwrap();
+    assert_ne!(was, flipped);
+    repl.eval(&format!("(sys/chain-editor! {was})")).unwrap();
+    assert_eq!(repl.eval("(:chain-editor (sys/view))").unwrap(), was);
+    let e = repl.eval("(sys/trigger! :explode)").unwrap_err();
+    assert!(e.contains("next-effect"), "{e}");
+}
