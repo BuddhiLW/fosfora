@@ -140,6 +140,11 @@ pub struct LayerPreset {
     /// the embedded `render` look, so a Helix effect round-trips fully.
     #[serde(default)]
     pub helix: Option<HelixParams>,
+    /// Runtime vector source; absent in old presets means the built-in ornament.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub svg_offset_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub svg_offset_settings: Option<crate::gpu::svg_offset::SvgOffsetSettings>,
     /// Live particle-sim knobs edited in the right panel (emit/lifetime/etc.).
     /// `None` for old presets; restored over the `.pfx` defaults on load.
     #[serde(default)]
@@ -764,6 +769,8 @@ mod tests {
                 obstacle_model: None,
                 lattice: None,
                 helix: None,
+            svg_offset_path: None,
+            svg_offset_settings: None,
                 particle_sim: None,
                 chain: None,
             }],
@@ -999,6 +1006,8 @@ mod tests {
             obstacle_model: None,
             lattice: Some(lat),
             helix: None,
+            svg_offset_path: None,
+            svg_offset_settings: None,
             particle_sim: None,
             chain: None,
         };

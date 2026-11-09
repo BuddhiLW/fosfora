@@ -629,6 +629,17 @@ impl ApplicationHandler for FosforaApp {
                             defaults: ps.helix_defaults,
                         });
 
+                    let svg_offset_info = app
+                        .layer_stack
+                        .active()
+                        .and_then(|l| l.as_effect())
+                        .and_then(|e| e.pass_executor.svg_offset.as_ref())
+                        .map(|s| crate::ui::panels::svg_offset_panel::SvgOffsetInfo {
+                            path: s.path.clone(),
+                            shapes: s.shape_count(),
+                            settings: s.settings.clone(),
+                        });
+
                     // Get obstacle info from active layer
                     let obstacle_info =
                         app.layer_stack
@@ -1079,6 +1090,7 @@ impl ApplicationHandler for FosforaApp {
                                 obstacle_info,
                                 lattice_info,
                                 helix_info,
+                                svg_offset_info,
                                 status_error: &app.status_error,
                                 settings: &app.settings,
                                 layer_thumbs: Some(&app.layer_thumbs),
@@ -2690,6 +2702,51 @@ impl ApplicationHandler for FosforaApp {
                                 if let Some(ps) = &mut e.pass_executor.particle_system {
                                     ps.helix_params = cmd.params;
                                     ps.init_helix(&device, hdr);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                {
+                    use crate::ui::panels::svg_offset_panel::SvgOffsetCommand;
+                    let cmd: Option<SvgOffsetCommand> = app
+                        .egui_overlay
+                        .context()
+                        .data_mut(|d| d.remove_temp(egui::Id::new("svg_offset_cmd")));
+                    if let Some(cmd) = cmd {
+                        if let Some(layer) = app.layer_stack.active_mut() {
+                            if let Some(e) = layer.as_effect_mut() {
+                                if let Some(svg) = &mut e.pass_executor.svg_offset {
+                                    let result = if cmd.reload {
+                                        svg.reload(
+                                            &app.gpu.device,
+                                            &app.gpu.queue,
+                                            cmd.path.as_deref(),
+                                            cmd.settings,
+                                            svg.output_size()[0],
+                                            svg.output_size()[1],
+                                        )
+                                    } else {
+                                        svg.settings = cmd.settings;
+                                        Ok(())
+                                    };
+                                    match result {
+                                        Ok(()) => {
+                                            e.shader_error = None;
+                                            app.preset_store.mark_dirty();
+                                        }
+                                        Err(err) => {
+                                            log::error!("SVG load: {err}");
+                                            e.shader_error = Some(err);
+                                        }
+                                    }
+                                    e.pass_executor.rebuild_all_bind_groups(
+                                        &app.gpu.device,
+                                        &e.uniform_buffer,
+                                        &app.placeholder,
+                                        &app.audio_textures,
+                                    );
                                 }
                             }
                         }

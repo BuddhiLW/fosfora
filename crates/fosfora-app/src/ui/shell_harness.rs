@@ -67,6 +67,7 @@ pub(crate) struct ShellHarness {
     pub obstacle_info: Option<crate::ui::panels::obstacle_panel::ObstacleInfo>,
     pub lattice_info: Option<crate::ui::panels::lattice_panel::LatticeInfo>,
     pub helix_info: Option<crate::ui::panels::helix_panel::HelixInfo>,
+    pub svg_offset_info: Option<crate::ui::panels::svg_offset_panel::SvgOffsetInfo>,
 }
 
 /// What the chain editor draws from: the app's trama system, and real
@@ -201,6 +202,7 @@ impl ShellHarness {
             obstacle_info: None,
             lattice_info: None,
             helix_info: None,
+            svg_offset_info: None,
         }
     }
 
@@ -305,6 +307,7 @@ impl ShellHarness {
                 obstacle_info: self.obstacle_info.clone(),
                 lattice_info: self.lattice_info.clone(),
                 helix_info: self.helix_info.clone(),
+                svg_offset_info: self.svg_offset_info.clone(),
                 status_error: &None,
                 settings: &self.settings,
                 layer_thumbs: None,

@@ -228,6 +228,14 @@ pub(crate) fn load_effect_into_layer(
             let LayerContent::Effect(ref mut e) = layer.content else {
                 return Err("layer is not an effect layer".to_string());
             };
+            if let Some(settings) = &effect.svg_offset {
+                let mut sim = super::svg_offset::SvgOffsetSim::new(ctx.device, ctx.queue, hdr_format, ctx.width, ctx.height)?;
+                if *settings != Default::default() {
+                    sim.reload(ctx.device, ctx.queue, None, settings.clone(), ctx.width, ctx.height)?;
+                }
+                executor.svg_offset = Some(sim);
+                executor.rebuild_all_bind_groups(ctx.device, &e.uniform_buffer, ctx.placeholder, ctx.audio_textures);
+            }
             executor.set_particle_system(
                 particle_system,
                 ctx.device,

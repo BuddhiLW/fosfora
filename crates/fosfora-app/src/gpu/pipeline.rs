@@ -26,7 +26,20 @@ impl ShaderPipeline {
         cache: Option<&wgpu::PipelineCache>,
         input_count: usize,
     ) -> Result<Self> {
-        let bind_group_layout = Self::create_bind_group_layout(device, input_count);
+        Self::new_with_unfilterable_inputs(device, format, fragment_source, cache, input_count, &[])
+    }
+
+    /// Rgba32Float data inputs (e.g. @svg.sdf) require non-filtering bindings
+    /// on baseline adapters. All ordinary pass/feedback inputs stay filterable.
+    pub fn new_with_unfilterable_inputs(
+        device: &Device,
+        format: TextureFormat,
+        fragment_source: &str,
+        cache: Option<&wgpu::PipelineCache>,
+        input_count: usize,
+        unfilterable: &[usize],
+    ) -> Result<Self> {
+        let bind_group_layout = Self::create_bind_group_layout(device, input_count, unfilterable);
 
         // Combine vertex + fragment into one module
         let full_source = format!("{}\n{}", FULLSCREEN_TRIANGLE_VS, fragment_source);
@@ -87,7 +100,7 @@ impl ShaderPipeline {
         Ok(())
     }
 
-    fn create_bind_group_layout(device: &Device, input_count: usize) -> BindGroupLayout {
+    fn create_bind_group_layout(device: &Device, input_count: usize, unfilterable: &[usize]) -> BindGroupLayout {
         // Fixed bindings 0-6, then `input_count` multi-pass inputs at 7+2i (texture) /
         // 8+2i (sampler) — the #1481 pass graph. Built as a Vec so the input tail is
         // variable-length.
@@ -172,7 +185,7 @@ impl ShaderPipeline {
                 binding: 7 + 2 * i,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: true },
+                    sample_type: TextureSampleType::Float { filterable: !unfilterable.contains(&(i as usize)) },
                     view_dimension: TextureViewDimension::D2,
                     multisampled: false,
                 },
@@ -181,7 +194,7 @@ impl ShaderPipeline {
             entries.push(BindGroupLayoutEntry {
                 binding: 8 + 2 * i,
                 visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                ty: BindingType::Sampler(if unfilterable.contains(&(i as usize)) { SamplerBindingType::NonFiltering } else { SamplerBindingType::Filtering }),
                 count: None,
             });
         }

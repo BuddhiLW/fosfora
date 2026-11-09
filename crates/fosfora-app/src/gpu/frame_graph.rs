@@ -1812,6 +1812,10 @@ mod tests {
                             push(what, ParamValue::Float(v));
                         }
                     }
+                    ParamDef::Int { min, max, .. } => {
+                        push("min", ParamValue::Float(*min as f32));
+                        push("max", ParamValue::Float(*max as f32));
+                    }
                     ParamDef::Bool { .. } => {
                         push("false", ParamValue::Bool(false));
                         push("true", ParamValue::Bool(true));
