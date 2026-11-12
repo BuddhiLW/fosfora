@@ -3,6 +3,11 @@
 <!-- Release workflow extracts notes between ## vX.Y.Z headers via awk. -->
 <!-- Keep the "## vX.Y.Z — date" format for automatic release notes. -->
 
+## v2.8.1-bw.4 — 2026-11-12
+
+### Changed
+- **This fork now publishes its own Linux and Windows downloads.** They are the same build as v2.8.1-bw.2. There is no macOS download: the fork has no Apple signing identity, so build from source there. v2.8.1-bw.3 was tagged for this and never published.
+
 ## v2.8.1-bw.3 — 2026-11-12
 
 ### Changed

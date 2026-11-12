@@ -19,19 +19,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Linux
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - name: macOS-arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
-          - name: macOS-x86_64
-            os: macos-latest
-            target: x86_64-apple-darwin
-          - name: Windows
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
+        # The macOS legs only feed the sign + notarize job, which a fork skips (see
+        # universal-macos). A fork therefore builds Linux and Windows only: its
+        # release must not wait on, or fail with, a macOS runner it has no use for.
+        include: >-
+          ${{ fromJSON(github.repository == 'kevinraymond/fosfora'
+          && '[{"name":"Linux","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},
+               {"name":"macOS-arm64","os":"macos-latest","target":"aarch64-apple-darwin"},
+               {"name":"macOS-x86_64","os":"macos-latest","target":"x86_64-apple-darwin"},
+               {"name":"Windows","os":"windows-latest","target":"x86_64-pc-windows-msvc"}]'
+          || '[{"name":"Linux","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},
+               {"name":"Windows","os":"windows-latest","target":"x86_64-pc-windows-msvc"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
