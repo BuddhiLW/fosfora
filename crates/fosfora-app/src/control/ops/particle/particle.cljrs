@@ -1,0 +1,137 @@
+(ns fosfora.particle
+  "Particles of the active layer: emission, sources, obstacle, morph targets,
+  lattice/helix, the volumetric look and quality. Preloaded as `particle`.
+
+    (particle/state)                     ; sim, source, obstacle, morph of the active layer
+    (particle/sim! :emit-rate 800 :drag 0.95 :trail-length 8)
+    (particle/quality! :ultra)
+    (particle/builtin! \"skull\")          ; built-in picture by index or name
+    (particle/image! \"~/pics/cat.png\")   ; no path opens the file dialog
+    (particle/webcam! \"Integrated\")      ; camera by name; none = default camera
+    (particle/pose! :yaw 30 :light-mix 0.5)
+    (particle/obstacle! :mode :drape)    ; any obstacle :cmd, its :value
+    (particle/obstacle-load! \"~/maps/terrain.png\")
+    (particle/morph-shape! :star) (particle/morph-text! \"HELLO\") (particle/morph-to! 1)
+    (particle/lattice! {:grid_res 64} :reseed true)
+    (particle/volumetric! :enabled true :params {:density 0.6})
+
+  Every function acts on the active layer; for another, call the op with
+  :layer, e.g. (f/op :particle/sim {:layer 2 :speed 0.3}). (f/help \"particle\")
+  lists the ops."
+  (:require [fosfora :as f]))
+
+(defn- arg [v] (if (keyword? v) (name v) v))
+(defn- opts [kvs] (into {} (map (fn [[k v]] [k (arg v)]) (partition 2 kvs))))
+(defn- pick [p] (if (integer? p) {:index p} {:name (str p)}))
+(defn- with-path [path] (if path {:path (str path)} {}))
+
+(defn state [] (f/op :particle/state))
+
+;; ── Emission, quality, look ──────────────────────────────────────────────
+
+(defn sim [] (f/op :particle/sim))
+(defn sim!
+  "Change emission params: :emit-rate :burst :lifetime :speed :size :drag :trail-length."
+  [& kvs]
+  (f/op :particle/sim (opts kvs)))
+
+(defn quality [] (f/op :particle/quality))
+(defn quality! [q] (f/op :particle/quality {:value (arg q)}))
+
+(defn volumetric [] (f/op :particle/volumetric))
+(defn volumetric!
+  "Change the volumetric look: :enabled bool, :params {field value} (a patch)."
+  [& kvs]
+  (f/op :particle/volumetric (opts kvs)))
+
+(defn lattice [] (f/op :particle/lattice))
+(defn lattice!
+  "Patch a lattice effect's params (snake_case keys, as (lattice) shows them).
+  Options: :reseed true."
+  [params & {:keys [reseed]}]
+  (f/op :particle/lattice {:params params :reseed (boolean reseed)}))
+
+(defn helix [] (f/op :particle/helix))
+(defn helix! [params] (f/op :particle/helix {:params params}))
+
+;; ── Source ───────────────────────────────────────────────────────────────
+
+(defn source [] (f/op :particle/source))
+(defn builtins [] (f/op :particle/builtins))
+(defn builtin! [p] (f/op :particle/load-builtin (pick p)))
+(defn image! ([] (image! nil)) ([path] (f/op :particle/load-image (with-path path))))
+(defn video! ([] (video! nil)) ([path] (f/op :particle/load-video (with-path path))))
+(defn model! ([] (model! nil)) ([path] (f/op :particle/load-model (with-path path))))
+
+(defn pose [] (:pose (f/op :particle/model-pose)))
+(defn pose!
+  "Change a model source's pose: :yaw :pitch :scale :ambient :light-mix
+  :light-x :light-y :light-z :rays."
+  [& kvs]
+  (f/op :particle/model-pose (opts kvs)))
+
+(defn webcams [] (f/op :particle/webcams))
+(defn webcam!
+  ([] (f/op :particle/webcam))
+  ([device] (f/op :particle/webcam {:device (str device)})))
+
+(defn transport [] (f/op :particle/video))
+(defn play! [] (f/op :particle/video {:playing true}))
+(defn pause! [] (f/op :particle/video {:playing false}))
+(defn loop! [on?] (f/op :particle/video {:looping (boolean on?)}))
+(defn video-speed! [x] (f/op :particle/video {:speed (double x)}))
+(defn seek! [secs] (f/op :particle/video {:seek (double secs)}))
+
+(defn loading [] (f/op :particle/loading))
+(defn cancel-load!
+  "Stop a source, obstacle or morph file still loading: by index or file
+  name; none when only one loads."
+  ([] (f/op :particle/cancel-load))
+  ([load] (f/op :particle/cancel-load {:load load})))
+
+(defn splat [] (f/op :particle/splat))
+(defn splat! ([] (splat! nil)) ([path] (f/op :particle/splat-load (with-path path))))
+(defn splat-demo! [] (f/op :particle/splat-demo))
+
+;; ── Obstacle ─────────────────────────────────────────────────────────────
+
+(defn obstacle [] (f/op :particle/obstacle))
+(defn obstacle!
+  "Run an obstacle command with its value: (obstacle! :threshold 0.4),
+  (obstacle! :mode :bounce), (obstacle! :fit :fill), (obstacle! :clear)."
+  ([cmd] (f/op :particle/obstacle {:cmd (arg cmd)}))
+  ([cmd value] (f/op :particle/obstacle {:cmd (arg cmd) :value (arg value)})))
+(defn obstacle-load! [path] (f/op :particle/obstacle-load {:path (str path)}))
+(defn obstacle-webcam! [p] (f/op :particle/obstacle-webcam (pick p)))
+
+;; ── Morph targets ────────────────────────────────────────────────────────
+
+(defn- slot [s] (if s {:slot s} {}))
+
+(defn morph [] (f/op :particle/morph))
+(defn morph-to! [target] (f/op :particle/morph-trigger {:target target}))
+(defn morph-from! [target] (f/op :particle/morph-source {:target target}))
+(defn morph-cycle! [mode] (f/op :particle/morph-cycle {:mode (arg mode)}))
+(defn morph-style! [style] (f/op :particle/morph-style {:style (arg style)}))
+(defn morph-hold! [secs] (f/op :particle/morph-hold {:secs (double secs)}))
+(defn morph-blend! [progress] (f/op :particle/morph-blend {:progress (double progress)}))
+(defn morph-clear! [s] (f/op :particle/morph-clear {:slot s}))
+
+(defn morph-shape!
+  "A generated shape (:circle :ring :grid :spiral :heart :star) as a target.
+  Options: :slot n."
+  [shape & kvs]
+  (f/op :particle/morph-geometry (merge {:shape (arg shape)} (slot (:slot (opts kvs))))))
+
+(defn morph-text! [text & kvs]
+  (f/op :particle/morph-text (merge {:text (str text)} (slot (:slot (opts kvs))))))
+
+(defn morph-snapshot! [& kvs] (f/op :particle/morph-snapshot (slot (:slot (opts kvs)))))
+
+(defn morph-load!
+  "A file as morph target(s): kind :image, :video or :model; no path opens
+  the dialog. Options: :slot n."
+  ([kind] (morph-load! kind nil))
+  ([kind path & kvs]
+   (f/op :particle/morph-load
+         (merge {:kind (arg kind)} (with-path path) (slot (:slot (opts kvs)))))))

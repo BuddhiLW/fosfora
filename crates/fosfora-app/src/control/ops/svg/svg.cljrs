@@ -1,0 +1,49 @@
+(ns fosfora.svg
+  "The SVG Offset layer, as its panel handles it. Preloaded as `svg`:
+
+    (svg/state)                        ; source, shapes, quality, background, offset, keyer
+    (svg/load! \"~/art/logo.svg\")      ; no path loads the built-in ornament
+    (svg/reload!)                      ; re-read the current file
+    (svg/settings! :quality :half :background :black)
+    (svg/offset! 0.2 -0.1) (svg/rotate! 45)
+    (svg/keyer! :width 0.5 :phase 0.25 :soft 0.1 :repeats 4)
+
+  Every function acts on the active layer; for another, call the op with
+  :layer, e.g. (f/op :svg/set {:layer 2 :rotation 90}). Amount, motion,
+  palette and order are effect params: (layer/set-param! ...).
+  (f/help \"svg\") lists the ops."
+  (:require [fosfora :as f]))
+
+(defn- arg [v] (if (keyword? v) (name v) v))
+(defn- opts [kvs] (into {} (map (fn [[k v]] [k (arg v)]) (partition 2 kvs))))
+
+(defn state [] (f/op :svg/state))
+
+(defn settings!
+  "Change settings: :quality (:full :half :quarter), :background (:alpha
+  :black :white), :offset [x y], :offset-x, :offset-y, :rotation,
+  :key-width, :key-phase, :key-soft, :key-repeat."
+  [& kvs]
+  (f/op :svg/set (opts kvs)))
+
+(defn load!
+  "Load an SVG file; no path loads the built-in ornament."
+  ([] (f/op :svg/load))
+  ([path] (f/op :svg/load (if path {:path (str path)} {}))))
+
+(defn reload! [] (f/op :svg/reload))
+
+(defn offset! [x y] (f/op :svg/set {:offset [(double x) (double y)]}))
+(defn rotate! [degrees] (f/op :svg/set {:rotation (double degrees)}))
+(defn quality! [q] (f/op :svg/set {:quality (arg q)}))
+(defn background! [b] (f/op :svg/set {:background (arg b)}))
+
+(defn keyer!
+  "Change the keyer: :width :phase :soft :repeats."
+  [& {:keys [width phase soft repeats]}]
+  (f/op :svg/set
+        (cond-> {}
+          width (assoc :key-width (double width))
+          phase (assoc :key-phase (double phase))
+          soft (assoc :key-soft (double soft))
+          repeats (assoc :key-repeat (double repeats)))))

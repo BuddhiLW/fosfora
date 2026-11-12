@@ -1,0 +1,475 @@
+//! Integration leg of the control-op trifecta: a running fosfora, driven over
+//! its embedded nREPL exactly as CIDER would.
+//!
+//! Skipped unless `FOSFORA_IT_NREPL=<port>` names a live instance started with
+//! `FOSFORA_NREPL=<port>` (`--features repl`). It writes and then deletes one
+//! uniquely named preset in that instance's config folder.
+//!
+//!     FOSFORA_NREPL=7888 cargo run --features repl,video &
+//!     FOSFORA_IT_NREPL=7888 cargo test --features repl,video --test repl_ops
+
+use std::io::{BufReader, Read, Write};
+use std::net::TcpStream;
+use std::time::Duration;
+
+/// A bencode value, as far as nREPL needs it.
+#[derive(Debug, Clone, PartialEq)]
+enum B {
+    Int(i64),
+    Str(String),
+    List(Vec<B>),
+    Dict(Vec<(String, B)>),
+}
+
+impl B {
+    fn get(&self, key: &str) -> Option<&B> {
+        match self {
+            B::Dict(kv) => kv.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+    fn str(&self) -> Option<&str> {
+        match self {
+            B::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+fn encode(v: &B, out: &mut Vec<u8>) {
+    match v {
+        B::Int(i) => out.extend(format!("i{i}e").bytes()),
+        B::Str(s) => {
+            out.extend(format!("{}:", s.len()).bytes());
+            out.extend(s.bytes());
+        }
+        B::List(items) => {
+            out.push(b'l');
+            for i in items {
+                encode(i, out);
+            }
+            out.push(b'e');
+        }
+        B::Dict(kv) => {
+            out.push(b'd');
+            for (k, v) in kv {
+                encode(&B::Str(k.clone()), out);
+                encode(v, out);
+            }
+            out.push(b'e');
+        }
+    }
+}
+
+fn byte(r: &mut impl Read) -> std::io::Result<u8> {
+    let mut b = [0u8];
+    r.read_exact(&mut b)?;
+    Ok(b[0])
+}
+
+fn decode_from(first: u8, r: &mut impl Read) -> std::io::Result<B> {
+    let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_owned());
+    Ok(match first {
+        b'i' => {
+            let mut s = String::new();
+            loop {
+                match byte(r)? {
+                    b'e' => break,
+                    c => s.push(c as char),
+                }
+            }
+            B::Int(s.parse().map_err(|_| bad("int"))?)
+        }
+        b'l' => {
+            let mut items = Vec::new();
+            loop {
+                match byte(r)? {
+                    b'e' => break,
+                    c => items.push(decode_from(c, r)?),
+                }
+            }
+            B::List(items)
+        }
+        b'd' => {
+            let mut kv = Vec::new();
+            loop {
+                match byte(r)? {
+                    b'e' => break,
+                    c => {
+                        let B::Str(k) = decode_from(c, r)? else {
+                            return Err(bad("dict key"));
+                        };
+                        let v = decode_from(byte(r)?, r)?;
+                        kv.push((k, v));
+                    }
+                }
+            }
+            B::Dict(kv)
+        }
+        d @ b'0'..=b'9' => {
+            let mut len = String::from(d as char);
+            loop {
+                match byte(r)? {
+                    b':' => break,
+                    c => len.push(c as char),
+                }
+            }
+            let mut buf = vec![0u8; len.parse().map_err(|_| bad("len"))?];
+            r.read_exact(&mut buf)?;
+            B::Str(String::from_utf8_lossy(&buf).into_owned())
+        }
+        _ => return Err(bad("unknown bencode tag")),
+    })
+}
+
+struct Repl {
+    out: TcpStream,
+    input: BufReader<TcpStream>,
+    next_id: u32,
+}
+
+impl Repl {
+    fn connect(port: u16) -> Self {
+        let out = TcpStream::connect(("127.0.0.1", port)).expect("connect to FOSFORA_IT_NREPL");
+        out.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let input = BufReader::new(out.try_clone().unwrap());
+        Self {
+            out,
+            input,
+            next_id: 0,
+        }
+    }
+
+    /// Evaluate `code`; the printed value, or the error text.
+    fn eval(&mut self, code: &str) -> Result<String, String> {
+        self.next_id += 1;
+        let id = self.next_id.to_string();
+        let msg = B::Dict(vec![
+            ("op".into(), B::Str("eval".into())),
+            ("code".into(), B::Str(code.into())),
+            ("ns".into(), B::Str("user".into())),
+            ("id".into(), B::Str(id.clone())),
+        ]);
+        let mut bytes = Vec::new();
+        encode(&msg, &mut bytes);
+        self.out.write_all(&bytes).unwrap();
+        let (mut value, mut err) = (None, String::new());
+        loop {
+            let first = byte(&mut self.input).expect("nREPL closed");
+            let resp = decode_from(first, &mut self.input).expect("bad bencode");
+            if resp.get("id").and_then(B::str) != Some(id.as_str()) {
+                continue;
+            }
+            if let Some(v) = resp.get("value").and_then(B::str) {
+                value = Some(v.to_owned());
+            }
+            for key in ["err", "ex"] {
+                if let Some(e) = resp.get(key).and_then(B::str) {
+                    err.push_str(e);
+                }
+            }
+            let done = matches!(resp.get("status"), Some(B::List(s)) if s.iter().any(|x| x.str() == Some("done")));
+            if done {
+                break;
+            }
+        }
+        match value {
+            Some(v) if err.is_empty() => Ok(v),
+            _ => Err(err),
+        }
+    }
+}
+
+fn live() -> Option<Repl> {
+    let port = std::env::var("FOSFORA_IT_NREPL").ok()?.parse().ok()?;
+    Some(Repl::connect(port))
+}
+
+#[test]
+fn bencode_round_trips() {
+    let v = B::Dict(vec![
+        ("a".into(), B::List(vec![B::Int(-3), B::Str("x:y".into())])),
+        ("b".into(), B::Str(String::new())),
+    ]);
+    let mut bytes = Vec::new();
+    encode(&v, &mut bytes);
+    let mut r = &bytes[..];
+    let first = byte(&mut r).unwrap();
+    assert_eq!(decode_from(first, &mut r).unwrap(), v);
+}
+
+#[test]
+fn every_builtin_addon_is_reachable_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    let addons = repl.eval("(f/addons)").unwrap();
+    for id in [
+        "core", "preset", "scene", "layer", "particle", "trama", "bindings", "system",
+    ] {
+        assert!(addons.contains(id), "{id} missing from {addons}");
+    }
+    let names = repl.eval("(mapv :name (f/ops))").unwrap();
+    assert!(names.contains("preset/save"), "{names}");
+    let e = repl.eval("(f/op :no/such-op)").unwrap_err();
+    assert!(e.contains("unknown op"), "{e}");
+}
+
+#[test]
+fn a_preset_saved_over_nrepl_lists_and_deletes() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    let name = format!("it-repl-ops-{}", std::process::id());
+    let before = repl.eval("(count (preset/ls))").unwrap();
+    let saved = repl.eval(&format!("(preset/save! \"{name}\")"));
+    // An empty stack cannot be saved; that is the app's answer, not a failure of the op path.
+    if let Err(e) = &saved {
+        assert!(e.contains("nothing to save"), "{e}");
+        return;
+    }
+    let listed = repl
+        .eval(&format!("(some #(= \"{name}\" (:name %)) (preset/ls))"))
+        .unwrap();
+    assert_eq!(listed, "true");
+    repl.eval(&format!("(preset/delete! \"{name}\")")).unwrap();
+    assert_eq!(repl.eval("(count (preset/ls))").unwrap(), before);
+}
+
+#[test]
+fn the_scene_namespace_reads_the_library_and_timeline_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Read-only: the user's scenes and cue list are left as they are.
+    assert_eq!(repl.eval("(vector? (scene/ls))").unwrap(), "true");
+    let state = repl.eval("(contains? (scene/current) :playing)").unwrap();
+    assert_eq!(state, "true");
+    let mode = repl.eval("(:mode (:advance (scene/timeline!)))").unwrap();
+    assert!(
+        ["\"manual\"", "\"timer\"", "\"beats\""].contains(&mode.as_str()),
+        "{mode}"
+    );
+}
+
+#[test]
+fn a_layer_opacity_set_over_nrepl_reads_back_and_is_restored() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    assert_ne!(repl.eval("(count (layer/ls))").unwrap(), "0");
+    let e = repl.eval("(layer/blend! nil :no-such-blend)").unwrap_err();
+    assert!(e.contains("no blend mode"), "{e}");
+    if repl.eval("(:locked (layer/get-layer))").unwrap() == "true" {
+        return;
+    }
+    let before = repl.eval("(:opacity (layer/get-layer))").unwrap();
+    assert_eq!(
+        repl.eval("(:opacity (layer/opacity! nil 0.25))").unwrap(),
+        "0.25"
+    );
+    repl.eval(&format!("(layer/opacity! nil {before})"))
+        .unwrap();
+}
+
+#[test]
+fn trama_chains_and_effects_read_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Reads only: the user's chains are left exactly as they are.
+    let first = repl.eval("(:chain (first (trama/chains)))").unwrap();
+    assert_eq!(first, "\"master\"");
+    let output = repl.eval("(:output (trama/graph :chain :master))").unwrap();
+    assert!(output.parse::<u64>().is_ok(), "{output}");
+    let dirs = repl.eval("(count (:dirs (trama/effects)))").unwrap();
+    assert_ne!(dirs, "0");
+    let e = repl
+        .eval("(trama/remove! \"output\" :chain :master)")
+        .unwrap_err();
+    assert!(e.contains("Output"), "{e}");
+}
+
+#[test]
+fn a_preset_binding_added_over_nrepl_lists_and_removes() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Preset-scoped bindings reach disk only on a preset save, so this leaves no file behind.
+    let name = format!("it-repl-ops-{}", std::process::id());
+    let before = repl.eval("(count (bind/ls))").unwrap();
+    let add = format!(
+        "(:id (bind/add! \"lfo.sine.bar\" \"global.master_opacity\" :name \"{name}\" :range [0.9 1.0]))"
+    );
+    let id = repl.eval(&add).unwrap();
+    let listed = repl.eval(&format!("(:name (bind/info {id}))")).unwrap();
+    assert_eq!(listed, format!("\"{name}\""));
+    repl.eval(&format!("(bind/remove! {id})")).unwrap();
+    assert_eq!(repl.eval("(count (bind/ls))").unwrap(), before);
+    let e = repl
+        .eval("(bind/add! \"audio.kick\" \"uniform.kik\")")
+        .unwrap_err();
+    assert!(e.contains("unknown target"), "{e}");
+}
+
+#[test]
+fn system_reads_and_a_reversible_view_toggle_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    let tempo = repl.eval("(sys/tempo)").unwrap();
+    assert!(tempo.contains(":center"), "{tempo}");
+    let triggers = repl.eval("(sys/triggers)").unwrap();
+    assert!(triggers.contains("next-preset"), "{triggers}");
+    assert_eq!(repl.eval("(count (sys/outputs))").unwrap(), "4");
+    let was = repl.eval("(:chain-editor (sys/view))").unwrap();
+    let flipped = repl.eval("(:chain-editor (sys/chain-editor!))").unwrap();
+    assert_ne!(was, flipped);
+    repl.eval(&format!("(sys/chain-editor! {was})")).unwrap();
+    assert_eq!(repl.eval("(:chain-editor (sys/view))").unwrap(), was);
+    let e = repl.eval("(sys/trigger! :explode)").unwrap_err();
+    assert!(e.contains("next-effect"), "{e}");
+}
+
+#[test]
+fn the_svg_namespace_reads_and_restores_an_svg_offset_layer_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    let names = repl.eval("(mapv :name (f/ops \"svg/\"))").unwrap();
+    for op in ["svg/state", "svg/set", "svg/load", "svg/reload"] {
+        assert!(names.contains(op), "{op} missing from {names}");
+    }
+    // Most layers are not SVG Offset; that is the app's answer, not a failure.
+    let state = repl.eval("(svg/state)");
+    let Ok(state) = state else {
+        let e = state.unwrap_err();
+        assert!(e.contains("no SVG Offset"), "{e}");
+        return;
+    };
+    assert!(state.contains(":shapes"), "{state}");
+    let e = repl.eval("(svg/settings! :rotation 999)").unwrap_err();
+    assert!(e.contains("rotation"), "{e}");
+    // Reversible: settings only, no reload, put back as they were.
+    let before = repl.eval("(:rotation (svg/state))").unwrap();
+    assert_eq!(repl.eval("(:rotation (svg/rotate! 12.5))").unwrap(), "12.5");
+    repl.eval(&format!("(svg/rotate! {before})")).unwrap();
+    assert_eq!(repl.eval("(:rotation (svg/state))").unwrap(), before);
+}
+
+#[test]
+fn osc_listener_and_sender_settings_read_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Reads, plus refusals that change nothing: the user's OSC rig is untouched.
+    let rx = repl.eval("(:port (bind/osc-config))").unwrap();
+    assert!(rx.parse::<u16>().is_ok_and(|p| p >= 1024), "{rx}");
+    let prefix = repl.eval("(:prefix (bind/osc-send))").unwrap();
+    assert!(
+        ["\"fosfora\"", "\"phosphor\""].contains(&prefix.as_str()),
+        "{prefix}"
+    );
+    let e = repl.eval("(bind/osc-config! :port 80)").unwrap_err();
+    assert!(e.contains(":port"), "{e}");
+    let e = repl.eval("(bind/osc-send! :rate 0)").unwrap_err();
+    assert!(e.contains(":rate"), "{e}");
+    assert_eq!(repl.eval("(:port (bind/osc-config))").unwrap(), rx);
+}
+
+#[test]
+fn appearance_web_port_and_tours_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // The scale is set to what it already is, so nothing visibly changes.
+    let scale = repl.eval("(:scale (sys/ui-scale))").unwrap();
+    assert_eq!(
+        repl.eval(&format!("(:scale (sys/ui-scale! {scale}))"))
+            .unwrap(),
+        scale
+    );
+    let e = repl.eval("(sys/ui-scale! 9)").unwrap_err();
+    assert!(e.contains(":scale"), "{e}");
+    let dir = repl.eval("(:dir (sys/theme-folder))").unwrap();
+    assert!(dir.contains("theme"), "{dir}");
+    let before = repl.eval("(count (sys/themes))").unwrap();
+    assert_eq!(repl.eval("(count (sys/reload-themes!))").unwrap(), before);
+    let port = repl.eval("(:port (sys/web))").unwrap();
+    let e = repl.eval("(sys/web! :port 1)").unwrap_err();
+    assert!(e.contains(":port"), "{e}");
+    assert_eq!(repl.eval("(:port (sys/web))").unwrap(), port);
+    assert_eq!(repl.eval("(count (sys/tours))").unwrap(), "4");
+    assert_eq!(
+        repl.eval("(contains? (sys/tour) :running)").unwrap(),
+        "true"
+    );
+}
+
+#[test]
+fn layer_insert_at_shader_source_and_media_loading_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Reads first: the shader the active layer runs, and the decode queue.
+    let src = repl.eval("(string? (layer/shader-source))");
+    if let Ok(v) = &src {
+        assert_eq!(v, "true");
+    } else {
+        assert!(src.unwrap_err().contains("not an effect layer"));
+    }
+    assert_eq!(repl.eval("(vector? (layer/loading))").unwrap(), "true");
+    let e = repl
+        .eval("(layer/cancel-media! \"no-such-file-in-the-queue.mp4\")")
+        .unwrap_err();
+    assert!(
+        e.contains("no media is loading") || e.contains("matches"),
+        "{e}"
+    );
+    // A layer inserted at the top lands there, selected; then it goes away.
+    let n: usize = repl.eval("(count (layer/ls))").unwrap().parse().unwrap();
+    let e = repl
+        .eval(&format!("(layer/add! :at {})", n + 1))
+        .unwrap_err();
+    assert!(e.contains("out of range"), "{e}");
+    let active = repl.eval("(:index (layer/get-layer))").unwrap();
+    let Ok(at) = repl.eval("(:index (layer/add! :at 0))") else {
+        return; // a full stack refuses; nothing changed
+    };
+    assert_eq!(at, "0");
+    assert_eq!(repl.eval("(:active (layer/get-layer 0))").unwrap(), "true");
+    repl.eval("(layer/remove! 0)").unwrap();
+    assert_eq!(repl.eval("(count (layer/ls))").unwrap(), n.to_string());
+    repl.eval(&format!("(layer/select! {active})")).unwrap();
+}
+
+#[test]
+fn particle_loading_and_cancel_load_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    assert_eq!(repl.eval("(vector? (particle/loading))").unwrap(), "true");
+    let e = repl
+        .eval("(particle/cancel-load! \"no-such-file-in-the-queue.png\")")
+        .unwrap_err();
+    assert!(
+        e.contains("no particle source is loading") || e.contains("matches"),
+        "{e}"
+    );
+    let e = repl
+        .eval("(f/op :particle/cancel-load {:load true})")
+        .unwrap_err();
+    assert!(!e.is_empty());
+}

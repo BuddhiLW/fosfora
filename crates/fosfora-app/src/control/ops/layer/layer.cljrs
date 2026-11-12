@@ -1,0 +1,143 @@
+(ns fosfora.layer
+  "The layer stack, effects, params, media, cameras and post-processing.
+  Preloaded as `layer`. A layer `l` is an index or a name (its label, or the
+  effect/file it shows); nil means the active layer.
+
+    (layer/ls)                         ; [{:index 0 :name \"Layer 1\" :kind \"effect\" ...}]
+    (layer/add!) (layer/select! 1) (layer/move! 1 :to 0) (layer/remove! 1)
+    (layer/opacity! nil 0.5) (layer/blend! 0 :screen) (layer/lock! 0 true)
+    (layer/effects :category \"fluid\")
+    (layer/load! \"Sumi\")             ; on the active layer
+    (layer/load! 12 :layer 2)
+    (layer/params)                     ; with ranges and normalized values
+    (layer/set-param! :speed 2.5)      ; real units, refused outside the range
+    (layer/set-param! :speed 0.8 :normalized true)
+    (layer/media! \"~/loops/a.mp4\") (layer/pause! nil) (layer/seek! nil 12.0)
+    (layer/postfx! {:bloom_intensity 0.6})"
+  (:require [fosfora :as f]))
+
+(defn- target [l]
+  (cond (nil? l) {}
+        (integer? l) {:index l}
+        :else {:name (if (keyword? l) (name l) (str l))}))
+
+(defn- nm [x] (if (keyword? x) (name x) x))
+
+;; Stack
+
+(defn ls [] (f/op :layer/list))
+(defn get-layer ([] (get-layer nil)) ([l] (f/op :layer/get (target l))))
+(defn add!
+  "Add an empty layer and select it; :at n puts it at position n (0 = top)."
+  [& {:keys [at]}]
+  (f/op :layer/add (if at {:at at} {})))
+(defn remove! [l] (f/op :layer/remove (target l)))
+(defn clear! [] (f/op :layer/clear))
+(defn move! [l & {:keys [to]}] (f/op :layer/move (assoc (target l) :to to)))
+(defn select! [l] (f/op :layer/select (target l)))
+
+(defn edit!
+  "Change layer `l`'s fields: :opacity :blend :displace :enabled :locked
+  :pinned :rename. (layer/edit! 0 :opacity 0.4 :blend :add)"
+  [l & {:as opts}]
+  (f/op :layer/set (merge (target l)
+                          (cond-> (or opts {})
+                            (:blend opts) (assoc :blend (nm (:blend opts)))))))
+
+(defn opacity! [l v] (edit! l :opacity (double v)))
+(defn blend! [l mode] (edit! l :blend mode))
+(defn displace! [l v] (edit! l :displace (double v)))
+(defn enable! [l on?] (edit! l :enabled (boolean on?)))
+(defn lock! [l on?] (edit! l :locked (boolean on?)))
+(defn pin! [l on?] (edit! l :pinned (boolean on?)))
+(defn rename! [l new-name] (edit! l :rename new-name))
+(defn blend-modes [] (f/op :layer/blend-modes))
+
+;; Effects
+
+(defn effects
+  "The catalog. Options: :category :favorites :query :hidden."
+  [& {:keys [category favorites query hidden]}]
+  (f/op :layer/effects
+        (cond-> {}
+          category (assoc :category (nm category))
+          favorites (assoc :favorites true)
+          query (assoc :query query)
+          hidden (assoc :hidden true))))
+
+(defn load!
+  "Run effect `e` (index or name) on :layer (default: the active one)."
+  [e & {:keys [layer]}]
+  (f/op :layer/load-effect (assoc (target layer) :effect (nm e))))
+
+(defn favorite!
+  "Star effect `e`; toggles without `on?`."
+  ([e] (f/op :layer/favorite {:effect (nm e)}))
+  ([e on?] (f/op :layer/favorite {:effect (nm e) :on (boolean on?)})))
+
+(defn create-effect! [effect-name] (f/op :layer/create-effect {:name effect-name}))
+
+(defn copy-effect!
+  "Copy :from (default: the active layer's effect) to a new effect `as`."
+  [as & {:keys [from]}]
+  (f/op :layer/copy-effect (cond-> {:as as} from (assoc :effect (nm from)))))
+
+(defn delete-effect! [e] (f/op :layer/delete-effect {:effect (nm e)}))
+(defn edit-shader! ([] (edit-shader! nil)) ([l] (f/op :layer/edit-shader (target l))))
+(defn save-shader! [] (f/op :layer/save-shader))
+(defn shader-source
+  "The WGSL layer `l` runs (its first pass); (:passes (f/op :layer/shader-source)) has them all."
+  ([] (shader-source nil))
+  ([l] (:source (f/op :layer/shader-source (target l)))))
+
+;; Params
+
+(defn params ([] (params nil)) ([l] (f/op :layer/params (target l))))
+(defn param [p & {:keys [layer]}] (f/op :layer/param (assoc (target layer) :param (nm p))))
+
+(defn set-param!
+  "Set param `p` to `v` in real units; :normalized true reads `v` as 0..1."
+  [p v & {:keys [layer normalized]}]
+  (f/op :layer/set-param (assoc (target layer) :param (nm p) :value v
+                                :normalized (boolean normalized))))
+
+(defn reset-param!
+  "Reset param `p` (all params without it) on :layer."
+  [& {:keys [param layer]}]
+  (f/op :layer/reset-param (cond-> (target layer) param (assoc :param (nm param)))))
+
+;; Media
+
+(defn media! [path] (f/op :layer/add-media {:path path}))
+(defn loading [] (f/op :layer/loading))
+(defn cancel-media!
+  "Stop a media file still decoding: by index or file name; none when only one loads."
+  ([] (f/op :layer/cancel-media))
+  ([load] (f/op :layer/cancel-media {:load load})))
+(defn transport ([] (transport nil)) ([l] (f/op :layer/media (target l))))
+(defn transport! [l & {:as opts}] (f/op :layer/transport (merge (target l) opts)))
+(defn play! [l] (transport! l :playing true))
+(defn pause! [l] (transport! l :playing false))
+(defn toggle! [l] (transport! l :toggle true))
+(defn seek! [l secs] (transport! l :seek (double secs)))
+(defn speed! [l x] (transport! l :speed (double x)))
+(defn loop! [l on?] (transport! l :loop (boolean on?)))
+(defn direction! [l d] (transport! l :direction (nm d)))
+
+;; Cameras
+
+(defn webcams [] (f/op :layer/webcams))
+(defn add-webcam! ([] (f/op :layer/add-webcam)) ([device] (f/op :layer/add-webcam {:device device})))
+(defn switch-webcam! [l device] (f/op :layer/switch-webcam (assoc (target l) :device device)))
+(defn mirror! [l on?] (f/op :layer/mirror (assoc (target l) :on (boolean on?))))
+(defn ffmpeg! [on?] (f/op :layer/webcam-backend {:ffmpeg (boolean on?)}))
+(defn streams [] (f/op :layer/streams))
+(defn streams! [ss] (f/op :layer/streams {:streams ss}))
+
+;; Post-processing
+
+(defn postfx [] (f/op :layer/postfx))
+(defn postfx! [m] (f/op :layer/postfx {:set m}))
+(defn adopt-postfx! [l] (f/op :layer/adopt-postfx (target l)))
+(defn postfx-previous! [] (f/op :layer/postfx-previous))
+(defn postfx-defaults! [] (f/op :layer/postfx-defaults))

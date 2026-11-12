@@ -193,10 +193,20 @@ impl PassExecutor {
                 .load_effect_source_with_inputs(&def.shader, input_count)
                 .map_err(|e| format!("Failed to load shader '{}': {e}", def.shader))?;
 
-            let unfilterable: Vec<usize> = input_srcs.iter().enumerate()
-                .filter_map(|(i,s)| matches!(s, InputSrc::SvgSdf).then_some(i)).collect();
-            let pipeline = ShaderPipeline::new_with_unfilterable_inputs(device, hdr_format, &source, pipeline_cache, input_count, &unfilterable)
-                .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
+            let unfilterable: Vec<usize> = input_srcs
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| matches!(s, InputSrc::SvgSdf).then_some(i))
+                .collect();
+            let pipeline = ShaderPipeline::new_with_unfilterable_inputs(
+                device,
+                hdr_format,
+                &source,
+                pipeline_cache,
+                input_count,
+                &unfilterable,
+            )
+            .map_err(|e| format!("Failed to compile shader '{}': {e}", def.shader))?;
 
             // Clear feedback targets to prevent NaN/garbage from uninitialized GPU memory
             let target = if def.feedback {
@@ -522,7 +532,9 @@ impl PassExecutor {
         }
 
         if let Some(svg) = &mut self.svg_offset {
-            if let Err(e) = svg.resize(device, queue, width, height) { log::error!("SVG resize: {e}"); }
+            if let Err(e) = svg.resize(device, queue, width, height) {
+                log::error!("SVG resize: {e}");
+            }
         }
         // Phase 2: rebuild all bind groups against the new targets (a pass may
         // sample another pass's just-recreated target).
@@ -712,7 +724,9 @@ fn build_bind_groups(
                 InputSrc::ParticleVelocity => {
                     particle_velocity.unwrap_or((&placeholder.view, &placeholder.sampler))
                 }
-                InputSrc::SvgSdf => svg_sdf.unwrap_or((&placeholder.view, &placeholder.nearest_sampler)),
+                InputSrc::SvgSdf => {
+                    svg_sdf.unwrap_or((&placeholder.view, &placeholder.nearest_sampler))
+                }
                 InputSrc::Backdrop => backdrop.unwrap_or((&placeholder.view, &placeholder.sampler)),
             })
             .collect();

@@ -29,6 +29,33 @@
   []
   (edn/read-string (native/audio-edn)))
 
+(defn- op-name [k]
+  (if (keyword? k)
+    (if-let [n (namespace k)] (str n "/" (name k)) (name k))
+    (str k)))
+
+(defn op
+  "Run control op `k` with `args` on the render thread and return its result.
+  Every UI action is an op: (f/op :preset/save {:name \"x\"}). Throws with the
+  op's message when it fails. (f/ops) lists them all."
+  ([k] (op k {}))
+  ([k args] (edn/read-string (native/op (op-name k) (pr-str (or args {}))))))
+
+(defn ops
+  "Every registered op: [{:name :addon :args :doc}]. With a string, only the
+  ops whose name contains it: (f/ops \"preset\")."
+  ([] (op :ops))
+  ([needle] (filterv #(str/includes? (:name %) needle) (ops))))
+
+(defn addons [] (op :addons))
+
+(defn help
+  "Print the ops (optionally those matching `needle`), one per line."
+  ([] (help ""))
+  ([needle]
+   (doseq [{:keys [name args doc]} (ops needle)]
+     (println (str name "  " args "\n    " doc)))))
+
 (defn- param-name [p] (if (keyword? p) (name p) (str p)))
 
 (defn set-param!

@@ -1,0 +1,134 @@
+(ns fosfora.system
+  "Tempo, Link, recording, outputs, settings, the window, triggers. Preloaded as `sys`:
+
+    (sys/tempo)                          ; {:bpm 128.0 :center 150.0 :sigma 1.0 :auto false :preset \"neutral\"}
+    (sys/tempo-config! :preset :house)   ; or :center 127 :sigma 0.35 :auto true
+    (sys/tap!) (sys/half!) (sys/double!) (sys/bpm! 174)
+    (sys/link! :enabled true :mode :lead :quantum 4)
+    (sys/record!) (sys/stop-recording!) (sys/recording)
+    (sys/recording-config! :codec :hevc :fps 30)
+    (sys/outputs)
+    (sys/output! :ndi :enabled true :name \"Stage\" :resolution :1080p)
+    (sys/output-window! 1) (sys/output-window! :close)
+    (sys/settings! :flash-limit :strict)
+    (sys/theme! \"black\") (sys/reload-themes!) (sys/save-theme-copy!) (sys/ui-scale! 1.25)
+    (sys/web! :port 9090) (sys/tour! \"layers\") (sys/tour! :end)
+    (sys/overlay!) (sys/fullscreen! true) (sys/escape!)
+    (sys/trigger! :next-preset)
+    (sys/quit!)                          ; the dialog; (sys/quit! :confirm) quits"
+  (:require [fosfora :as f]))
+
+(defn- target [p] (if (integer? p) {:index p} {:name (str p)}))
+(defn- nm [x] (if (keyword? x) (name x) x))
+
+(defn- opts
+  "Keyword options as an args map, keyword values as names."
+  [kvs]
+  (into {} (map (fn [[k v]] [k (nm v)]) (partition 2 kvs))))
+
+;; Tempo and Link
+(defn tempo [] (f/op :system/tempo))
+(defn tempo-config!
+  "Change the tempo prior: :preset (neutral wide house drum-and-bass hip-hop
+  ambient), :center BPM, :sigma octaves, :auto bool."
+  [& kvs]
+  (f/op :system/tempo-config (opts kvs)))
+(defn tap! [] (f/op :system/tempo-tap))
+(defn bpm! [bpm] (f/op :system/tempo-set {:bpm (double bpm)}))
+(defn half! [] (f/op :system/tempo-half))
+(defn double! [] (f/op :system/tempo-double))
+(defn link [] (f/op :system/link))
+(defn link!
+  "Change Link: :enabled bool, :mode :follow|:lead, :quantum beats, :start-stop bool."
+  [& kvs]
+  (f/op :system/link (opts kvs)))
+
+;; Recording
+(defn recording [] (f/op :system/recording))
+(defn record! [] (f/op :system/record-start))
+(defn stop-recording! [] (f/op :system/record-stop))
+(defn toggle-recording! [] (f/op :system/record-toggle))
+(defn recording-config!
+  "Change recording settings: :codec :resolution :fps :quality :container :hw :audio."
+  [& kvs]
+  (f/op :system/recording-config (opts kvs)))
+
+;; Outputs
+(defn outputs [] (f/op :system/outputs))
+(defn output [kind] (f/op :system/output {:kind (nm kind)}))
+(defn output!
+  "Switch or configure an output (:ndi :spout :syphon :v4l2): :enabled bool,
+  :name str, :resolution :match|:720p|:1080p|:4k|:8k, :alpha-from-luma bool,
+  :device path|:auto, :pixel-format :yuyv|:bgrx."
+  [kind & kvs]
+  (f/op :system/output (assoc (opts kvs) :kind (nm kind))))
+(defn refresh-v4l2! [] (f/op :system/v4l2-refresh))
+(defn displays [] (f/op :system/output-window))
+(defn output-window!
+  "Open the output window on display `d` (index or name), or close it with :close."
+  [d]
+  (f/op :system/output-window (if (= d :close) {:close true} (target d))))
+
+;; Settings
+(defn settings [] (f/op :system/settings))
+(defn settings!
+  "Change :flash-limit (auto standard strict off), :output-alpha (auto opaque
+  luma passthrough) or :auto-reconnect bool."
+  [& kvs]
+  (f/op :system/settings (opts kvs)))
+(defn themes [] (f/op :system/theme))
+(defn theme! [t] (f/op :system/theme (target t)))
+(defn reload-themes! [] (f/op :system/theme-reload))
+(defn save-theme-copy!
+  "Save the theme in use as a new file in the themes folder, and use it."
+  []
+  (f/op :system/theme-save-copy))
+(defn theme-folder [] (f/op :system/theme-folder))
+(defn open-theme-folder! [] (f/op :system/theme-folder {:open true}))
+(defn ui-scale [] (f/op :system/ui-scale))
+(defn ui-scale!
+  "Interface scale, 0.8..2.0 (1.0 = 100 %)."
+  [s]
+  (f/op :system/ui-scale {:scale (double s)}))
+(defn web [] (f/op :system/web))
+(defn web!
+  "Change the web remote: :enabled bool, :lan bool, :port 1024..65535."
+  [& kvs]
+  (f/op :system/web (opts kvs)))
+(defn replace-web-key! [] (f/op :system/web-replace-key))
+
+;; Window, view, shortcuts
+(defn view [] (f/op :system/view))
+(defn overlay!
+  "Show (true) or hide (false) the interface; no argument toggles."
+  ([] (f/op :system/overlay))
+  ([on] (f/op :system/overlay {:visible (boolean on)})))
+(defn fullscreen!
+  ([] (f/op :system/fullscreen))
+  ([on] (f/op :system/fullscreen {:on (boolean on)})))
+(defn binding-matrix!
+  ([] (f/op :system/binding-matrix))
+  ([open] (f/op :system/binding-matrix {:open (boolean open)})))
+(defn chain-editor!
+  ([] (f/op :system/chain-editor))
+  ([open] (f/op :system/chain-editor {:open (boolean open)})))
+(defn workspace [] (f/op :system/workspace))
+(defn workspace! [ws] (f/op :system/workspace {:name (nm ws)}))
+(defn tours [] (f/op :system/tours))
+(defn tour [] (f/op :system/tour))
+(defn tour!
+  "Start tour `t` (index or name); (tour! :end) ends the one showing."
+  [t]
+  (f/op :system/tour (if (= t :end) {:end true} (target t))))
+(defn escape! [] (f/op :system/escape))
+(defn quit!
+  "Show the quit dialog; (quit! :confirm) quits, (quit! :cancel) closes the dialog."
+  ([] (f/op :system/quit))
+  ([how] (f/op :system/quit (if (= how :cancel) {:cancel true} {:confirm (= how :confirm)}))))
+
+;; Triggers
+(defn triggers [] (f/op :system/triggers))
+(defn trigger!
+  "Fire a trigger action by name: (sys/trigger! :next-preset). (sys/triggers) lists them."
+  [action]
+  (f/op :system/trigger {:action (nm action)}))

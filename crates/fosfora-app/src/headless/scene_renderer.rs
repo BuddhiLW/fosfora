@@ -424,11 +424,26 @@ impl SceneRenderer {
                 layer.custom_name = lp.custom_name.clone();
                 if let Some(e) = layer.as_effect_mut() {
                     if let Some(svg) = &mut e.pass_executor.svg_offset {
-                        let settings = lp.svg_offset_settings.clone().unwrap_or_else(|| svg.settings.clone());
-                        if let Err(err) = svg.reload(&device, &self.queue, lp.svg_offset_path.as_deref(), settings, self.width, self.height) {
+                        let settings = lp
+                            .svg_offset_settings
+                            .clone()
+                            .unwrap_or_else(|| svg.settings.clone());
+                        if let Err(err) = svg.reload(
+                            &device,
+                            &self.queue,
+                            lp.svg_offset_path.as_deref(),
+                            settings,
+                            self.width,
+                            self.height,
+                        ) {
                             log::warn!("SVG preset source: {err}");
                         }
-                        e.pass_executor.rebuild_all_bind_groups(&device, &e.uniform_buffer, &self.placeholder, &self.audio_textures);
+                        e.pass_executor.rebuild_all_bind_groups(
+                            &device,
+                            &e.uniform_buffer,
+                            &self.placeholder,
+                            &self.audio_textures,
+                        );
                     }
                 }
                 if let Some(ps) = layer

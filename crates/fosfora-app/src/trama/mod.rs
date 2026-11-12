@@ -291,6 +291,12 @@ impl TramaSystem {
         std::mem::take(&mut self.edited)
     }
 
+    /// A chain was edited from outside the canvas (a control op): light the
+    /// preset's "unsaved" marker as a canvas edit would.
+    pub fn mark_edited(&mut self) {
+        self.edited = true;
+    }
+
     /// The executor's feedback parity for this frame. The frame graph pairs a
     /// layer's two ping-pong targets against it when handing the layer's
     /// picture to its chain.

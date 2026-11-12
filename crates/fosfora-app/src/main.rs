@@ -38,7 +38,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Icon, Window, WindowAttributes, WindowId};
+use winit::window::{Icon, Window, WindowAttributes, WindowId};
 
 use app::App;
 use effect::loader::EffectLoader;
@@ -270,52 +270,12 @@ impl ApplicationHandler for FosforaApp {
                     return;
                 }
                 match key {
+                    // The Escape ladder (bind, matrix, interface, tour, chain
+                    // editor, output window, quit): `App::escape`, op `system/escape`.
                     KeyCode::Escape => {
-                        // Cancel a half-finished click-to-bind, then close the
-                        // binding matrix, then bring the interface back, then
-                        // the shader editor, then quit.
-                        //
-                        // "Bring the interface back" is why Escape is not the
-                        // first step to quitting any more: the shell's Full
-                        // output button hides every panel, and the way back was
-                        // D — which nothing on screen says once the panels are
-                        // gone. Escape is the key people press to get out of a
-                        // full-screen view, and pressing it offered to quit.
-                        //
-                        // The second output window is on that ladder for the
-                        // same reason. Escape closes it from the window itself,
-                        // but the pointer is usually over the main window when
-                        // someone wants it gone, and there it offered to quit
-                        // instead.
-                        //
-                        // The workspace's chain editor modal comes before it,
-                        // as the binding matrix's does.
-                        if app.binding_matrix.open && app.binding_matrix.armed.is_some() {
-                            app.binding_matrix.armed = None;
-                        } else if app.binding_matrix.open {
-                            app.binding_matrix.open = false;
-                        } else if !app.egui_overlay.visible {
-                            app.egui_overlay.toggle_visible();
-                        } else if crate::ui::tour::current(&app.egui_overlay.context()).is_some()
-                        {
-                            // The tour sees the same Escape in its own frame
-                            // and ends itself; here it only must not quit.
-                        } else if app.trama.canvas_open {
-                            app.trama.canvas_open = false;
-                        } else if app.output_window.is_some() {
-                            app.close_output_window();
-                        } else if !app.shader_editor.open {
-                            app.quit_requested = true;
-                        }
+                        app.escape();
                     }
-                    KeyCode::KeyF => {
-                        let window = &app.window;
-                        if window.fullscreen().is_some() {
-                            window.set_fullscreen(None);
-                        } else {
-                            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-                        }
-                    }
+                    KeyCode::KeyF => app.toggle_fullscreen(),
                     KeyCode::KeyD => {
                         app.egui_overlay.toggle_visible();
                     }
@@ -335,39 +295,19 @@ impl ApplicationHandler for FosforaApp {
                         }
                     KeyCode::KeyB
                         if !app.shader_editor.open => {
-                            app.binding_matrix.open = !app.binding_matrix.open;
-                            // One modal at a time.
-                            if app.binding_matrix.open {
-                                app.trama.canvas_open = false;
-                            }
+                            app.set_binding_matrix_open(!app.binding_matrix.open);
                         }
                     // The chain editor: C for chain, the word the interface
                     // uses (it was G before v2).
                     KeyCode::KeyC
                         if !app.shader_editor.open => {
-                            app.trama.canvas_open = !app.trama.canvas_open;
-                            if app.trama.canvas_open {
-                                app.binding_matrix.open = false;
-                            }
+                            app.set_chain_editor_open(!app.trama.canvas_open);
                         }
                     KeyCode::BracketLeft => {
-                        // Previous layer
-                        let num = app.layer_stack.layers.len();
-                        if num > 1 {
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer =
-                                if current == 0 { num - 1 } else { current - 1 };
-                            app.sync_active_layer();
-                        }
+                        app.run_trigger(crate::midi::types::TriggerAction::PrevLayer);
                     }
                     KeyCode::BracketRight => {
-                        // Next layer
-                        let num = app.layer_stack.layers.len();
-                        if num > 1 {
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer = (current + 1) % num;
-                            app.sync_active_layer();
-                        }
+                        app.run_trigger(crate::midi::types::TriggerAction::NextLayer);
                     }
                     _ => {}
                 }
@@ -1175,37 +1115,11 @@ impl ApplicationHandler for FosforaApp {
                         &mut app.binding_matrix,
                         &mut app.binding_bus,
                         || {
-                            let layers = app
-                                .layer_stack
-                                .layers
-                                .iter()
-                                .enumerate()
-                                .map(|(i, l)| {
-                                    let effect_name = l
-                                        .effect_index()
-                                        .and_then(|idx| app.effect_loader.effects.get(idx))
-                                        .map(|eff| eff.name.clone())
-                                        .unwrap_or_default();
-                                    let param_names = l
-                                        .param_store
-                                        .defs
-                                        .iter()
-                                        .filter(|d| {
-                                            matches!(
-                                                d,
-                                                crate::params::ParamDef::Float { .. }
-                                                    | crate::params::ParamDef::Bool { .. }
-                                            )
-                                        })
-                                        .map(|d| d.name().to_string())
-                                        .collect();
-                                    crate::ui::panels::binding_helpers::LayerParamInfo {
-                                        index: i,
-                                        effect_name,
-                                        param_names,
-                                    }
-                                })
-                                .collect();
+                            let layers =
+                                fosfora_app::control::ops::bindings::actions::layer_param_infos(
+                                    &app.layer_stack,
+                                    &app.effect_loader,
+                                );
                             crate::ui::panels::binding_helpers::BindingPanelInfo {
                                 layers,
                                 active_layer,
@@ -1323,7 +1237,7 @@ impl ApplicationHandler for FosforaApp {
                                                 .clicked()
                                                 || esc_cancel
                                             {
-                                                app.quit_requested = false;
+                                                app.cancel_quit();
                                             }
                                         },
                                     );
@@ -1342,10 +1256,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("confirm_quit")));
                 if confirm_quit.is_some() {
-                    app.gpu.save_pipeline_cache();
-                    // Flush any global binding edit still inside the 1s debounce
-                    // window so it isn't lost on quit.
-                    app.binding_bus.flush();
+                    app.prepare_quit();
                     event_loop.exit();
                 }
 
@@ -1355,26 +1266,8 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("open_shader_editor")));
                 if open_editor.is_some() {
-                    // Resolve active layer's shader path
-                    if let Some(idx) = app.layer_stack.active().and_then(|l| l.effect_index()) {
-                        if let Some(effect) = app.effect_loader.effects.get(idx).cloned() {
-                            let passes = effect.normalized_passes();
-                            if let Some(pass) = passes.first() {
-                                let path = app.effect_loader.resolve_shader_path(&pass.shader);
-                                if let Ok(content) = std::fs::read_to_string(&path) {
-                                    app.shader_editor.open_file(&effect.name, path, content);
-                                    // Load paired .pfx file for tab switching
-                                    if let Some(ref pfx_path) = effect.source_path {
-                                        if let Ok(pfx_content) = std::fs::read_to_string(pfx_path) {
-                                            app.shader_editor
-                                                .load_paired_pfx(pfx_path.clone(), pfx_content);
-                                        }
-                                    }
-                                } else {
-                                    log::error!("Could not read shader: {}", path.display());
-                                }
-                            }
-                        }
+                    if let Err(e) = app.shader_editor_open(app.layer_stack.active_layer) {
+                        log::warn!("Shader editor: {e}");
                     }
                 }
 
@@ -1383,38 +1276,9 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("shader_editor_save")));
                 if save_editor.is_some() {
-                    // Save the active tab
-                    if let Some(ref path) = app.shader_editor.file_path {
-                        match std::fs::write(path, &app.shader_editor.code) {
-                            Ok(()) => {
-                                app.shader_editor.disk_content = app.shader_editor.code.clone();
-                                log::info!("Saved shader: {}", path.display());
-                            }
-                            Err(e) => {
-                                log::error!("Failed to save shader: {e}");
-                                app.status_error =
-                                    Some((format!("Save failed: {e}"), std::time::Instant::now()));
-                            }
-                        }
-                    }
-                    // Also save the paired tab if it has unsaved changes
-                    if app.shader_editor.paired_is_dirty() {
-                        if let Some(ref paired_path) = app.shader_editor.paired_path {
-                            match std::fs::write(paired_path, &app.shader_editor.paired_content) {
-                                Ok(()) => {
-                                    app.shader_editor.paired_disk_content =
-                                        app.shader_editor.paired_content.clone();
-                                    log::info!("Saved paired file: {}", paired_path.display());
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to save paired file: {e}");
-                                    app.status_error = Some((
-                                        format!("Save failed: {e}"),
-                                        std::time::Instant::now(),
-                                    ));
-                                }
-                            }
-                        }
+                    if let Err(e) = app.shader_editor_save() {
+                        app.status_error =
+                            Some((format!("Save failed: {e}"), std::time::Instant::now()));
                     }
                 }
 
@@ -1469,33 +1333,9 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("delete_effect")));
                 if let Some(idx) = delete_effect {
-                    match app.effect_loader.delete_effect(idx) {
-                        Ok(name) => {
-                            log::info!("Deleted effect: {name}");
-                            // A deleted effect can't stay pinned
-                            if let Some(pos) = app
-                                .settings
-                                .favorite_effects
-                                .iter()
-                                .position(|f| *f == name)
-                            {
-                                app.settings.favorite_effects.remove(pos);
-                                app.settings.save();
-                            }
-                            // Close shader editor if it was editing the deleted effect
-                            if app.shader_editor.open {
-                                app.shader_editor.open = false;
-                            }
-                            // Fix up current_effect after rescan
-                            // The active layer's effect_index refers to the old list,
-                            // so just clear it — the effect stays rendered but is gone from panel
-                            app.effect_loader.current_effect = None;
-                        }
-                        Err(e) => {
-                            log::error!("Failed to delete effect: {e}");
-                            app.status_error =
-                                Some((format!("Delete failed: {e}"), std::time::Instant::now()));
-                        }
+                    if let Err(e) = app.effect_delete(idx) {
+                        app.status_error =
+                            Some((format!("Delete failed: {e}"), std::time::Instant::now()));
                     }
                 }
 
@@ -1505,17 +1345,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("toggle_favorite_effect")));
                 if let Some(name) = toggle_fav {
-                    if let Some(pos) = app
-                        .settings
-                        .favorite_effects
-                        .iter()
-                        .position(|f| *f == name)
-                    {
-                        app.settings.favorite_effects.remove(pos);
-                    } else {
-                        app.settings.favorite_effects.push(name);
-                    }
-                    app.settings.save();
+                    app.effect_set_favorite(&name, None);
                 }
 
                 let create_effect: Option<String> = app
@@ -1535,68 +1365,27 @@ impl ApplicationHandler for FosforaApp {
                 // the one in use as a new file to edit.
                 {
                     use crate::ui::panels::appearance_panel::ThemeIntent;
-                    use crate::ui::theme::custom;
                     let intent: Option<ThemeIntent> = app.egui_overlay.context().data_mut(|d| {
                         let id = egui::Id::new(ThemeIntent::ID);
                         let v = d.get_temp(id);
                         d.remove::<ThemeIntent>(id);
                         v
                     });
-                    let mut pick = None;
-                    let relisted =
-                        matches!(intent, Some(ThemeIntent::Reload | ThemeIntent::SaveCopy));
-                    match intent {
-                        Some(ThemeIntent::Use(theme)) => pick = Some(theme),
+                    let failed = match intent {
+                        Some(ThemeIntent::Use(theme)) => {
+                            app.apply_theme(theme);
+                            None
+                        }
                         Some(ThemeIntent::Reload) => {
-                            app.custom_themes = custom::load_dir(&custom::themes_dir());
-                            pick = Some(app.settings.theme.clone());
+                            app.reload_themes();
+                            None
                         }
-                        Some(ThemeIntent::SaveCopy) => {
-                            let name = format!(
-                                "{} copy",
-                                app.settings.theme.display_name(&app.custom_themes)
-                            );
-                            match custom::write_new(
-                                &custom::themes_dir(),
-                                &name,
-                                &app.egui_overlay.palette,
-                            ) {
-                                Ok(path) => {
-                                    log::info!("theme saved to {}", path.display());
-                                    app.custom_themes = custom::load_dir(&custom::themes_dir());
-                                    pick = path
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .map(|s| crate::ui::theme::ThemeMode::Custom(s.into()));
-                                }
-                                Err(e) => {
-                                    app.status_error = Some((
-                                        format!("Could not save the theme: {e}"),
-                                        std::time::Instant::now(),
-                                    ));
-                                }
-                            }
-                        }
-                        Some(ThemeIntent::OpenFolder) => {
-                            if let Err(e) = custom::reveal(&custom::themes_dir()) {
-                                app.status_error = Some((
-                                    format!("Could not open the themes folder: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                            }
-                        }
-                        None => {}
-                    }
-                    if relisted {
-                        custom::publish(&app.egui_overlay.context(), &app.custom_themes);
-                    }
-                    if let Some(theme) = pick {
-                        app.egui_overlay
-                            .set_palette(theme.palette(&app.custom_themes));
-                        if theme != app.settings.theme {
-                            app.settings.theme = theme;
-                            app.settings.save();
-                        }
+                        Some(ThemeIntent::SaveCopy) => app.save_theme_copy().err(),
+                        Some(ThemeIntent::OpenFolder) => app.open_themes_folder().err(),
+                        None => None,
+                    };
+                    if let Some(msg) = failed {
+                        app.status_error = Some((msg, std::time::Instant::now()));
                     }
                 }
 
@@ -1606,25 +1395,17 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_output_alpha")));
                 if let Some(mode) = set_output_alpha {
-                    app.settings.output_alpha = mode;
-                    app.settings.save();
+                    app.set_output_alpha(mode);
                 }
 
-                // Handle particle quality change from settings panel
+                // Handle particle quality change from settings panel (reloads the
+                // active effect to rebuild its particle buffers)
                 let set_quality: Option<crate::settings::ParticleQuality> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_particle_quality")));
                 if let Some(quality) = set_quality {
-                    app.settings.particle_quality = quality;
-                    app.settings.save();
-                    // Reload active effect to rebuild particle system with new buffer size
-                    let active = app.layer_stack.active_layer;
-                    if let Some(layer) = app.layer_stack.layers.get(active) {
-                        if let Some(effect_idx) = layer.effect_index() {
-                            app.load_effect_on_layer(active, effect_idx);
-                        }
-                    }
+                    app.set_particle_quality(quality);
                 }
 
                 // Handle band-scale change from settings panel (A1 #1452)
@@ -1633,10 +1414,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_band_scale")));
                 if let Some(scale) = set_band_scale {
-                    app.settings.band_scale = scale;
-                    app.settings.save();
-                    // Rebuild the audio pipeline so the analyzer picks up the new scaling.
-                    app.audio.set_band_scale(scale);
+                    app.apply_band_scale(scale);
                 }
 
                 // Persist the input trim (#84). The slider already set it live.
@@ -1645,8 +1423,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_input_trim")));
                 if let Some(db) = set_input_trim {
-                    app.settings.input_trim_db = db;
-                    app.settings.save();
+                    app.apply_input_trim(db);
                 }
 
                 // Persist the A/V sync offset (#80). The slider already set it live.
@@ -1655,8 +1432,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_sync_offset")));
                 if let Some(ms) = set_sync_offset {
-                    app.settings.sync_offset_ms = ms;
-                    app.settings.save();
+                    app.apply_sync_offset(ms);
                 }
 
                 // Handle auto-reconnect toggle from settings panel (A9 #1460)
@@ -1665,9 +1441,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_auto_reconnect")));
                 if let Some(on) = set_auto_reconnect {
-                    app.settings.auto_reconnect = on;
-                    app.settings.save();
-                    app.audio.set_auto_reconnect(on);
+                    app.set_auto_reconnect(on);
                 }
 
                 // "Full output" in the shell's top bar hides the interface, the
@@ -1767,8 +1541,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("set_flash_limit")));
                 if let Some(limit) = set_flash_limit {
-                    app.settings.flash_limit = limit;
-                    app.settings.save();
+                    app.set_flash_limit(limit);
                 }
 
                 // Persist A18 structure tuning after a slider release (#1510). The live value
@@ -1779,9 +1552,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("structure_tuning_dirty")));
                 if tuning_dirty == Some(true) {
-                    app.settings.structure_tuning =
-                        *app.audio.tuning().lock().unwrap_or_else(|e| e.into_inner());
-                    app.settings.save();
+                    app.persist_structure_tuning();
                 }
 
                 // Persist the A7 tempo prior after a slider release / preset pick (#1458). Same
@@ -1792,13 +1563,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("tempo_config_dirty")));
                 if tempo_dirty == Some(true) {
-                    app.settings.tempo = app
-                        .audio
-                        .tempo()
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .config;
-                    app.settings.save();
+                    app.save_tempo_config();
                 }
 
                 // Handle FFmpeg webcam toggle from settings panel
@@ -1809,33 +1574,12 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("set_ffmpeg_webcam")));
                     if let Some(use_ffmpeg) = set_ffmpeg {
-                        if use_ffmpeg && !crate::media::webcam_ffmpeg::ffmpeg_available() {
-                            app.status_error = Some((
-                                "FFmpeg not found in PATH. Install FFmpeg to use this feature."
-                                    .into(),
-                                std::time::Instant::now(),
-                            ));
-                        } else {
-                            // Stop any active capture
-                            app.webcam_captures.clear();
-                            app.use_ffmpeg_webcam = use_ffmpeg;
-                            app.settings.use_ffmpeg_webcam = use_ffmpeg;
-                            app.settings.save();
-                            // Refresh device list with new backend
-                            app.refresh_webcam_devices();
-                            app.start_rtmp_streams();
-                            let backend = if use_ffmpeg { "FFmpeg" } else { "native" };
-                            let device_count = app.webcam_devices.len();
-                            log::info!(
-                                "Webcam backend switched to {backend}, {device_count} device(s) found"
-                            );
-                            app.status_error = Some((
-                                format!(
-                                    "Webcam: {backend} backend, {device_count} device(s) found"
-                                ),
-                                std::time::Instant::now(),
-                            ));
-                        }
+                        let backend = if use_ffmpeg { "FFmpeg" } else { "native" };
+                        let msg = app.webcam_set_ffmpeg(use_ffmpeg).map_or_else(
+                            |e| e,
+                            |n| format!("Webcam: {backend} backend, {n} device(s) found"),
+                        );
+                        app.status_error = Some((msg, std::time::Instant::now()));
                     }
                 }
 
@@ -1865,18 +1609,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("switch_audio_device")));
                 if let Some(device_str) = switch_audio {
-                    let device_name = if device_str.is_empty() {
-                        None
-                    } else {
-                        Some(device_str.as_str())
-                    };
-                    app.audio.switch_device(device_name);
-                    app.settings.audio_device = if device_str.is_empty() {
-                        None
-                    } else {
-                        Some(device_str)
-                    };
-                    app.settings.save();
+                    app.apply_audio_device((!device_str.is_empty()).then_some(device_str));
                 }
 
                 // Handle Ableton Link signals from UI
@@ -1917,13 +1650,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_set_enabled")));
                     if let Some(enabled) = ndi_enable {
-                        app.ndi.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_ndi_enabled(enabled);
                     }
 
                     let ndi_source: Option<String> = app
@@ -1931,14 +1658,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_source_name")));
                     if let Some(name) = ndi_source {
-                        app.ndi.config.source_name = name;
-                        app.ndi.config.save();
-                        app.ndi.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_ndi(|c| c.source_name = name);
                     }
 
                     let ndi_res: Option<u8> = app
@@ -1950,14 +1670,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::ndi::types::OutputResolution::Match);
-                        app.ndi.config.resolution = res;
-                        app.ndi.config.save();
-                        app.ndi.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_ndi(|c| c.resolution = res);
                     }
 
                     let ndi_alpha_luma: Option<bool> = app
@@ -1965,8 +1678,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("ndi_alpha_from_luma")));
                     if let Some(val) = ndi_alpha_luma {
-                        app.ndi.config.alpha_from_luma = val;
-                        app.ndi.config.save();
+                        app.configure_ndi(|c| c.alpha_from_luma = val);
                     }
                 }
 
@@ -1978,13 +1690,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("v4l2_set_enabled")));
                     if let Some(enabled) = v4l2_enable {
-                        app.v4l2.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_v4l2_enabled(enabled);
                     }
 
                     let v4l2_device: Option<Option<String>> = app
@@ -1992,14 +1698,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("v4l2_device_path")));
                     if let Some(path) = v4l2_device {
-                        app.v4l2.config.device_path = path;
-                        app.v4l2.config.save();
-                        app.v4l2.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_v4l2(|c| c.device_path = path);
                     }
 
                     let v4l2_res: Option<u8> = app
@@ -2011,14 +1710,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::v4l2::types::OutputResolution::Match);
-                        app.v4l2.config.resolution = res;
-                        app.v4l2.config.save();
-                        app.v4l2.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_v4l2(|c| c.resolution = res);
                     }
 
                     let v4l2_fmt: Option<u8> = app
@@ -2030,14 +1722,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(fmt_u8 as usize)
                             .copied()
                             .unwrap_or_default();
-                        app.v4l2.config.pixel_format = fmt;
-                        app.v4l2.config.save();
-                        app.v4l2.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_v4l2(|c| c.pixel_format = fmt);
                     }
 
                     let v4l2_refresh: Option<bool> = app
@@ -2057,13 +1742,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("spout_set_enabled")));
                     if let Some(enabled) = spout_enable {
-                        app.spout.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_spout_enabled(enabled);
                     }
 
                     let spout_name: Option<String> = app
@@ -2071,14 +1750,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("spout_sender_name")));
                     if let Some(name) = spout_name {
-                        app.spout.config.sender_name = name;
-                        app.spout.config.save();
-                        app.spout.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_spout(|c| c.sender_name = name);
                     }
 
                     let spout_res: Option<u8> = app
@@ -2090,14 +1762,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::spout::types::OutputResolution::Match);
-                        app.spout.config.resolution = res;
-                        app.spout.config.save();
-                        app.spout.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_spout(|c| c.resolution = res);
                     }
                 }
 
@@ -2109,13 +1774,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("syphon_set_enabled")));
                     if let Some(enabled) = syphon_enable {
-                        app.syphon.set_enabled(
-                            enabled,
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.set_syphon_enabled(enabled);
                     }
 
                     let syphon_name: Option<String> = app
@@ -2123,14 +1782,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("syphon_server_name")));
                     if let Some(name) = syphon_name {
-                        app.syphon.config.server_name = name;
-                        app.syphon.config.save();
-                        app.syphon.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_syphon(|c| c.server_name = name);
                     }
 
                     let syphon_res: Option<u8> = app
@@ -2142,14 +1794,7 @@ impl ApplicationHandler for FosforaApp {
                             .get(res_u8 as usize)
                             .copied()
                             .unwrap_or(crate::syphon::types::OutputResolution::Match);
-                        app.syphon.config.resolution = res;
-                        app.syphon.config.save();
-                        app.syphon.restart(
-                            &app.gpu.device,
-                            app.gpu.format,
-                            app.render_size().0,
-                            app.render_size().1,
-                        );
+                        app.configure_syphon(|c| c.resolution = res);
                     }
                 }
 
@@ -2160,31 +1805,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("recording_toggle")));
                     if rec_toggle.is_some() {
-                        if app.recording.is_recording() {
-                            app.recording.stop();
-                        } else {
-                            let audio_source = if app.audio.active {
-                                Some(crate::recording::encoder::AudioSource {
-                                    ring: app.audio.recording_ring.clone(),
-                                    sample_rate: app.audio.recording_rate,
-                                })
-                            } else {
-                                None
-                            };
-                            if let Err(e) = app.recording.start(
-                                &app.gpu.device,
-                                app.gpu.format,
-                                app.render_size().0,
-                                app.render_size().1,
-                                audio_source,
-                            ) {
-                                log::error!("Failed to start recording: {e}");
-                                app.status_error = Some((
-                                    format!("Recording failed to start: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                            }
-                        }
+                        app.toggle_recording();
                     }
 
                     let rec_codec: Option<u8> = app
@@ -2195,8 +1816,7 @@ impl ApplicationHandler for FosforaApp {
                         if let Some(&codec) =
                             crate::recording::types::VideoCodec::ALL.get(idx as usize)
                         {
-                            app.recording.config.codec = codec;
-                            app.recording.config.save();
+                            app.configure_recording(|c| c.codec = codec);
                         }
                     }
 
@@ -2208,8 +1828,7 @@ impl ApplicationHandler for FosforaApp {
                         if let Some(&res) =
                             crate::gpu::types::OutputResolution::ALL.get(idx as usize)
                         {
-                            app.recording.config.resolution = res;
-                            app.recording.config.save();
+                            app.configure_recording(|c| c.resolution = res);
                         }
                     }
 
@@ -2218,8 +1837,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_fps_change")));
                     if let Some(fps) = rec_fps {
-                        app.recording.config.fps = fps;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.fps = fps);
                     }
 
                     let rec_quality: Option<u32> = app
@@ -2227,8 +1845,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_quality_change")));
                     if let Some(q) = rec_quality {
-                        app.recording.config.quality = q;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.quality = q);
                     }
 
                     let rec_container: Option<u8> = app
@@ -2239,8 +1856,7 @@ impl ApplicationHandler for FosforaApp {
                         if let Some(&cont) =
                             crate::recording::types::Container::ALL.get(idx as usize)
                         {
-                            app.recording.config.container = cont;
-                            app.recording.config.save();
+                            app.configure_recording(|c| c.container = cont);
                         }
                     }
 
@@ -2249,8 +1865,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_hw_toggle")));
                     if let Some(hw) = rec_hw {
-                        app.recording.config.use_hw_encoder = hw;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.use_hw_encoder = hw);
                     }
 
                     let rec_audio: Option<bool> = app
@@ -2258,8 +1873,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("rec_audio_toggle")));
                     if let Some(val) = rec_audio {
-                        app.recording.config.record_audio = val;
-                        app.recording.config.save();
+                        app.configure_recording(|c| c.record_audio = val);
                     }
                 }
 
@@ -2269,11 +1883,8 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("pending_effect")));
                 if let Some(idx) = pending.or(app.egui_overlay.pending_effect_load.take()) {
-                    let active_locked = app.layer_stack.active().map_or(false, |l| l.locked);
-                    if !active_locked {
-                        app.load_effect(idx);
-                        app.preset_store.mark_dirty();
-                    }
+                    // A locked layer refuses; the click does nothing.
+                    let _ = app.layer_load_effect(app.layer_stack.active_layer, idx);
                 }
 
                 // A catalog effect dropped on the stack, or added from its
@@ -2392,30 +2003,14 @@ impl ApplicationHandler for FosforaApp {
                     }
                 }
 
-                // Handle scene UI signals
+                // Handle scene UI signals (shared with the scene/* ops)
+                use fosfora_app::control::ops::scene::{CueEdit, advance_from_ui_id};
                 let save_scene: Option<String> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("save_scene")));
                 if let Some(name) = save_scene {
-                    let is_new = !app.scene_store.scenes.iter().any(|(n, _)| n == &name);
-                    if is_new {
-                        // New scene: clear timeline so user starts with a blank cue list
-                        app.timeline.cues.clear();
-                        app.timeline.stop();
-                        app.timeline.loop_mode = false;
-                        app.timeline.advance_mode = crate::scene::types::AdvanceMode::Manual;
-                    }
-                    let set = crate::scene::types::SceneSet {
-                        version: 1,
-                        name: name.clone(),
-                        cues: app.timeline.cues.clone(),
-                        loop_mode: app.timeline.loop_mode,
-                        advance_mode: app.timeline.advance_mode,
-                    };
-                    if let Err(e) = app.scene_store.save(&name, set) {
-                        log::error!("Failed to save scene: {e}");
-                    }
+                    app.save_scene(&name);
                 }
                 let load_scene_idx: Option<usize> = app
                     .egui_overlay
@@ -2470,28 +2065,21 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_go_next")));
                 if scene_go_next.is_some() {
-                    let event = app.timeline.go_next();
-                    app.process_timeline_event(event);
+                    app.scene_go_next();
                 }
                 let scene_go_prev: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_go_prev")));
                 if scene_go_prev.is_some() {
-                    let event = app.timeline.go_prev();
-                    app.process_timeline_event(event);
+                    app.scene_go_prev();
                 }
                 let scene_toggle_play: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_toggle_play")));
                 if scene_toggle_play.is_some() {
-                    if app.timeline.active {
-                        app.timeline.stop();
-                    } else if !app.timeline.cues.is_empty() {
-                        let event = app.timeline.start(0);
-                        app.process_timeline_event(event);
-                    }
+                    app.toggle_scene_play();
                 }
 
                 // Drain scene transport triggers from binding bus
@@ -2499,14 +2087,8 @@ impl ApplicationHandler for FosforaApp {
                 for action in pending {
                     use fosfora_app::bindings::types::TransportAction;
                     match action {
-                        TransportAction::Go => {
-                            let event = app.timeline.go_next();
-                            app.process_timeline_event(event);
-                        }
-                        TransportAction::Prev => {
-                            let event = app.timeline.go_prev();
-                            app.process_timeline_event(event);
-                        }
+                        TransportAction::Go => app.scene_go_next(),
+                        TransportAction::Prev => app.scene_go_prev(),
                         TransportAction::Stop => {
                             app.timeline.stop();
                         }
@@ -2519,8 +2101,7 @@ impl ApplicationHandler for FosforaApp {
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_add_cue")));
                 let mut scene_dirty = false;
                 if let Some(preset_name) = add_cue {
-                    let cue = app.new_cue(preset_name);
-                    app.timeline.cues.push(cue);
+                    app.add_scene_cue(preset_name);
                     scene_dirty = true;
                 }
                 // The workspace's cue strip (#3173): a preset dropped between
@@ -2531,8 +2112,7 @@ impl ApplicationHandler for FosforaApp {
                 if let Some((name, at)) =
                     ctx.data_mut(|d| d.remove_temp::<(String, usize)>(take("scene_insert_cue")))
                 {
-                    let cue = app.new_cue(name);
-                    app.timeline.insert_cue(at, cue);
+                    app.insert_scene_cue(at, name);
                     scene_dirty = true;
                 }
                 if let Some((from, to)) =
@@ -2544,34 +2124,26 @@ impl ApplicationHandler for FosforaApp {
                 if let Some((idx, label)) =
                     ctx.data_mut(|d| d.remove_temp::<(usize, String)>(take("scene_set_cue_label")))
                 {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        let label = label.trim();
-                        cue.label = (!label.is_empty()).then(|| label.to_string());
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::label(label));
                 }
                 if let Some(idx) =
                     ctx.data_mut(|d| d.remove_temp::<usize>(take("scene_clear_cue_hold")))
                 {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.hold_secs = None;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::hold(None));
                 }
                 let scene_jump: Option<usize> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_jump_to_cue")));
                 if let Some(cue_idx) = scene_jump {
-                    let event = app.timeline.go_to_cue(cue_idx);
-                    app.process_timeline_event(event);
+                    app.scene_jump_to_cue(cue_idx);
                 }
                 let scene_loop: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_loop")));
                 if let Some(loop_mode) = scene_loop {
-                    app.timeline.loop_mode = loop_mode;
+                    app.set_scene_loop(loop_mode);
                     scene_dirty = true;
                 }
                 let scene_remove_cue: Option<usize> = app
@@ -2579,11 +2151,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_remove_cue")));
                 if let Some(cue_idx) = scene_remove_cue {
-                    if cue_idx < app.timeline.cues.len() {
-                        app.timeline.cues.remove(cue_idx);
-                        app.timeline.notify_cue_removed(cue_idx);
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.remove_scene_cue(cue_idx);
                 }
                 // Per-cue transition type
                 let set_cue_transition: Option<(usize, crate::scene::types::TransitionType)> = app
@@ -2591,10 +2159,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_transition")));
                 if let Some((idx, tt)) = set_cue_transition {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.transition = tt;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::transition(tt));
                 }
                 // Per-cue transition duration
                 let set_cue_dur: Option<(usize, f32)> = app
@@ -2602,10 +2167,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_transition_secs")));
                 if let Some((idx, secs)) = set_cue_dur {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.transition_secs = secs;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::secs(secs));
                 }
                 // Advance mode
                 let set_advance: Option<u32> = app
@@ -2613,19 +2175,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_advance_mode")));
                 if let Some(mode_id) = set_advance {
-                    app.timeline.advance_mode = match mode_id {
-                        1 => {
-                            // Initialize hold_secs for cues that don't have one
-                            for cue in &mut app.timeline.cues {
-                                if cue.hold_secs.is_none() {
-                                    cue.hold_secs = Some(4.0);
-                                }
-                            }
-                            crate::scene::types::AdvanceMode::Timer
-                        }
-                        2 => crate::scene::types::AdvanceMode::BeatSync { beats_per_cue: 4 },
-                        _ => crate::scene::types::AdvanceMode::Manual,
-                    };
+                    app.set_scene_advance_mode(advance_from_ui_id(mode_id));
                     scene_dirty = true;
                 }
                 // Beats per cue (BeatSync)
@@ -2634,13 +2184,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_beats_per_cue")));
                 if let Some(bpc) = set_bpc {
-                    if let crate::scene::types::AdvanceMode::BeatSync {
-                        ref mut beats_per_cue,
-                    } = app.timeline.advance_mode
-                    {
-                        *beats_per_cue = bpc;
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.set_scene_beats_per_cue(bpc);
                 }
                 // Per-cue hold seconds (Timer mode)
                 let set_hold: Option<(usize, f32)> = app
@@ -2648,10 +2192,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("scene_set_cue_hold_secs")));
                 if let Some((idx, hold)) = set_hold {
-                    if let Some(cue) = app.timeline.cues.get_mut(idx) {
-                        cue.hold_secs = Some(hold);
-                        scene_dirty = true;
-                    }
+                    scene_dirty |= app.edit_scene_cue(idx, &CueEdit::hold(Some(hold)));
                 }
 
                 // Auto-save scene after any cue/timeline mutation
@@ -2668,19 +2209,9 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("lattice_cmd")));
                     if let Some(cmd) = lattice_cmd {
-                        app.preset_store.mark_dirty();
-                        let device = app.gpu.device.clone();
-                        let hdr = crate::gpu::GpuContext::hdr_format();
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(ps) = &mut e.pass_executor.particle_system {
-                                    ps.lattice_params = cmd.params;
-                                    ps.init_lattice(&device, hdr);
-                                    if cmd.reseed {
-                                        ps.request_lattice_seed();
-                                    }
-                                }
-                            }
+                        let layer = app.layer_stack.active_layer;
+                        if let Err(e) = app.apply_lattice(layer, cmd.params, cmd.reseed) {
+                            log::debug!("Lattice: {e}");
                         }
                     }
                 }
@@ -2694,16 +2225,9 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("helix_cmd")));
                     if let Some(cmd) = helix_cmd {
-                        app.preset_store.mark_dirty();
-                        let device = app.gpu.device.clone();
-                        let hdr = crate::gpu::GpuContext::hdr_format();
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(ps) = &mut e.pass_executor.particle_system {
-                                    ps.helix_params = cmd.params;
-                                    ps.init_helix(&device, hdr);
-                                }
-                            }
+                        let layer = app.layer_stack.active_layer;
+                        if let Err(e) = app.apply_helix(layer, cmd.params) {
+                            log::debug!("Helix: {e}");
                         }
                     }
                 }
@@ -2715,269 +2239,49 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("svg_offset_cmd")));
                     if let Some(cmd) = cmd {
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(svg) = &mut e.pass_executor.svg_offset {
-                                    let result = if cmd.reload {
-                                        svg.reload(
-                                            &app.gpu.device,
-                                            &app.gpu.queue,
-                                            cmd.path.as_deref(),
-                                            cmd.settings,
-                                            svg.output_size()[0],
-                                            svg.output_size()[1],
-                                        )
-                                    } else {
-                                        svg.settings = cmd.settings;
-                                        Ok(())
-                                    };
-                                    match result {
-                                        Ok(()) => {
-                                            e.shader_error = None;
-                                            app.preset_store.mark_dirty();
-                                        }
-                                        Err(err) => {
-                                            log::error!("SVG load: {err}");
-                                            e.shader_error = Some(err);
-                                        }
-                                    }
-                                    e.pass_executor.rebuild_all_bind_groups(
-                                        &app.gpu.device,
-                                        &e.uniform_buffer,
-                                        &app.placeholder,
-                                        &app.audio_textures,
-                                    );
-                                }
-                            }
-                        }
+                        let layer = app.layer_stack.active_layer;
+                        // A failed load is already logged and shown as the
+                        // layer's shader error; a layer without SVG Offset
+                        // ignores the command, as before.
+                        let _ = app.apply_svg_offset_command(layer, cmd);
                     }
                 }
 
-                // Handle obstacle panel signals
+                // Handle obstacle panel signals. Image and model loads come back
+                // as a file dialog for the window to open.
                 {
                     use crate::ui::panels::obstacle_panel::ObstacleCommand;
-                    #[cfg(feature = "webcam")]
-                    let mut obstacle_start_webcam = false;
-                    #[cfg(feature = "depth")]
-                    let mut obstacle_start_depth = false;
+                    use fosfora_app::control::ops::particle::ObstacleFollowUp;
                     let obstacle_cmd: Option<ObstacleCommand> = app
                         .egui_overlay
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("obstacle_cmd")));
-                    if let Some(cmd) = obstacle_cmd.filter(|c| !matches!(c, ObstacleCommand::None))
-                    {
-                        app.preset_store.mark_dirty();
-                        #[cfg(feature = "video")]
-                        let active_idx = app.layer_stack.active_layer;
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(ps) = &mut e.pass_executor.particle_system {
-                                    match cmd {
-                                        ObstacleCommand::SetEnabled(en) => {
-                                            ps.obstacle_enabled = en;
-                                        }
-                                        ObstacleCommand::SetMode(mode) => {
-                                            ps.obstacle_mode = mode;
-                                        }
-                                        ObstacleCommand::SetFit(fit) => {
-                                            ps.obstacle_fit = fit;
-                                        }
-                                        ObstacleCommand::SetThreshold(t) => {
-                                            ps.obstacle_threshold = t;
-                                        }
-                                        ObstacleCommand::SetElasticity(e_val) => {
-                                            ps.obstacle_elasticity = e_val;
-                                        }
-                                        ObstacleCommand::LoadImage => {
-                                            // Open file dialog for obstacle image
-                                            if self.obstacle_dialog_rx.is_none() {
-                                                let (tx, rx) = crossbeam_channel::bounded(1);
-                                                self.obstacle_dialog_rx = Some(rx);
-                                                std::thread::Builder::new()
-                                                    .name("obstacle-dialog".into())
-                                                    .spawn(move || {
-                                                        let dialog = rfd::FileDialog::new()
-                                                            .add_filter(
-                                                                "Images",
-                                                                &[
-                                                                    "png", "jpg", "jpeg", "webp",
-                                                                    "bmp",
-                                                                ],
-                                                            );
-                                                        if let Some(path) = dialog.pick_file() {
-                                                            let _ = tx.send(path);
-                                                        }
-                                                    })
-                                                    .ok();
-                                            }
-                                        }
-                                        ObstacleCommand::LoadVideo => {
-                                            // The dialog and the decode both run on the
-                                            // loader's thread; the result lands through
-                                            // the particle source drain (#3159).
-                                            #[cfg(feature = "video")]
-                                            {
-                                                let request = crate::gpu::particle::SourceRequest {
-                                                    layer_idx: active_idx,
-                                                    as_obstacle: true,
-                                                    ..Default::default()
-                                                };
-                                                if let Err(e) = app
-                                                    .particle_source_loader
-                                                    .open_video_dialog(request)
-                                                {
-                                                    log::error!(
-                                                        "Could not open the obstacle video dialog: {e}"
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        ObstacleCommand::LoadModel => {
-                                            // File dialog for a 3D-model obstacle
-                                            // (.glb/.gltf mesh or .ply/.splat cloud, #1851).
-                                            if self.obstacle_dialog_rx.is_none() {
-                                                let (tx, rx) = crossbeam_channel::bounded(1);
-                                                self.obstacle_dialog_rx = Some(rx);
-                                                std::thread::Builder::new()
-                                                    .name("obstacle-model-dialog".into())
-                                                    .spawn(move || {
-                                                        let dialog = rfd::FileDialog::new()
-                                                            .add_filter(
-                                                                "3D model",
-                                                                &["glb", "gltf", "ply", "splat"],
-                                                            );
-                                                        if let Some(path) = dialog.pick_file() {
-                                                            let _ = tx.send(path);
-                                                        }
-                                                    })
-                                                    .ok();
-                                            }
-                                        }
-                                        ObstacleCommand::UseWebcam => {
-                                            // Start webcam capture if not already running
-                                            #[cfg(feature = "webcam")]
-                                            {
-                                                obstacle_start_webcam = true;
-                                                ps.obstacle_enabled = true;
-                                                ps.obstacle_source =
-                                                    Some(gpu::particle::ObstacleSource::Webcam);
-                                                ps.obstacle_image_path = None;
-                                            }
-                                        }
-                                        ObstacleCommand::UseDepth => {
-                                            #[cfg(feature = "depth")]
-                                            {
-                                                if !crate::depth::model::ort_available() {
-                                                    log::error!(
-                                                        "ONNX Runtime not available for depth estimation"
-                                                    );
-                                                } else {
-                                                    obstacle_start_depth = true;
-                                                    ps.obstacle_enabled = true;
-                                                    ps.obstacle_source =
-                                                        Some(gpu::particle::ObstacleSource::Depth);
-                                                    ps.obstacle_image_path = None;
-                                                }
-                                            }
-                                        }
-                                        ObstacleCommand::DownloadDepthModel => {
-                                            #[cfg(feature = "depth")]
-                                            {
-                                                if app.depth_download.is_none()
-                                                    || app
-                                                        .depth_download
-                                                        .as_ref()
-                                                        .map_or(false, |p| !p.is_downloading())
-                                                {
-                                                    app.depth_download =
-                                                        Some(crate::depth::model::download_model());
-                                                    log::info!("Starting depth model download");
-                                                }
-                                            }
-                                        }
-                                        ObstacleCommand::Clear => {
-                                            ps.clear_obstacle(&app.gpu.device, &app.gpu.queue);
-                                            // Stop depth thread when obstacle cleared
-                                            #[cfg(feature = "depth")]
-                                            {
-                                                app.depth_thread = None;
-                                            }
-                                            #[cfg(feature = "webcam")]
-                                            app.cleanup_webcam_if_unused();
-                                        }
-                                        ObstacleCommand::SetWaterEnabled(en) => {
-                                            ps.obstacle_water_enabled = en;
-                                        }
-                                        ObstacleCommand::SetWaterLevel(v) => {
-                                            ps.obstacle_water_params.level_scale = v;
-                                        }
-                                        ObstacleCommand::SetWaterSource(v) => {
-                                            ps.obstacle_water_params.source_rate = v;
-                                        }
-                                        ObstacleCommand::SetWaterDrain(v) => {
-                                            ps.obstacle_water_params.drain = v;
-                                        }
-                                        ObstacleCommand::SetWaterFlux(v) => {
-                                            ps.obstacle_water_params.flux_gain = v;
-                                        }
-                                        ObstacleCommand::SetModelSpin(v) => {
-                                            ps.obstacle_model_spin = v;
-                                        }
-                                        ObstacleCommand::SetModelDisplay(v) => {
-                                            ps.obstacle_model_display = v;
-                                        }
-                                        ObstacleCommand::SetFluidEnabled(en) => {
-                                            ps.obstacle_fluid_enabled = en;
-                                        }
-                                        ObstacleCommand::SetFluidSpeed(v) => {
-                                            ps.obstacle_fluid_params.flow_speed = v;
-                                        }
-                                        ObstacleCommand::SetFluidCoupling(v) => {
-                                            ps.obstacle_fluid_coupling = v;
-                                        }
-                                        ObstacleCommand::SetFluidVorticity(v) => {
-                                            ps.obstacle_fluid_params.vorticity = v;
-                                        }
-                                        ObstacleCommand::SetFluidViscosity(v) => {
-                                            ps.obstacle_fluid_params.viscosity = v;
-                                        }
-                                        ObstacleCommand::SetFluidGrid(g) => {
-                                            ps.obstacle_fluid_grid = g;
-                                        }
-                                        ObstacleCommand::None => {}
+                    let layer = app.layer_stack.active_layer;
+                    match obstacle_cmd.map(|cmd| app.apply_obstacle_command(layer, cmd)) {
+                        None | Some(Ok(ObstacleFollowUp::Done)) => {}
+                        Some(Ok(follow)) if self.obstacle_dialog_rx.is_none() => {
+                            let (title, exts): (&'static str, &'static [&'static str]) =
+                                if follow == ObstacleFollowUp::ModelDialog {
+                                    ("3D model", &["glb", "gltf", "ply", "splat"])
+                                } else {
+                                    ("Images", &["png", "jpg", "jpeg", "webp", "bmp"])
+                                };
+                            let (tx, rx) = crossbeam_channel::bounded(1);
+                            self.obstacle_dialog_rx = Some(rx);
+                            std::thread::Builder::new()
+                                .name("obstacle-dialog".into())
+                                .spawn(move || {
+                                    let dialog = rfd::FileDialog::new().add_filter(title, exts);
+                                    if let Some(path) = dialog.pick_file() {
+                                        let _ = tx.send(path);
                                     }
-                                }
-                            }
+                                })
+                                .ok();
                         }
-                    }
-                    // Deferred webcam/depth starts (outside mutable layer_stack borrow)
-                    #[cfg(feature = "webcam")]
-                    if obstacle_start_webcam {
-                        if let Err(e) = app.ensure_default_webcam() {
-                            log::error!("Failed to start webcam for obstacle: {e}");
-                            app.status_error =
-                                Some((format!("Webcam failed: {e}"), std::time::Instant::now()));
-                        }
-                    }
-                    #[cfg(feature = "depth")]
-                    if obstacle_start_depth {
-                        #[cfg(feature = "webcam")]
-                        if let Err(e) = app.ensure_default_webcam() {
-                            log::error!("Failed to start webcam for depth obstacle: {e}");
-                            app.status_error =
-                                Some((format!("Webcam failed: {e}"), std::time::Instant::now()));
-                        }
-                        if app.depth_thread.is_none() {
-                            let model_path = crate::depth::model::model_path();
-                            match crate::depth::thread::DepthThread::start(model_path) {
-                                Ok(dt) => {
-                                    app.depth_thread = Some(dt);
-                                    log::info!("Depth estimation thread started");
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to start depth thread: {e}");
-                                }
-                            }
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => {
+                            log::error!("Obstacle: {e}");
+                            app.status_error = Some((e, std::time::Instant::now()));
                         }
                     }
                 }
@@ -2989,90 +2293,24 @@ impl ApplicationHandler for FosforaApp {
                         d.remove_temp(egui::Id::new("switch_obstacle_webcam_device"))
                     });
                     if let Some(new_idx) = switch_obs_device {
-                        // The previous camera keeps running until the new
-                        // one is, so a camera that fails to open changes
-                        // nothing.
-                        let started = app
-                            .webcam_device_name(new_idx)
-                            .ok_or_else(|| "Camera is no longer connected".to_string())
-                            .and_then(|name| app.ensure_webcam(&name));
-                        match started {
-                            Ok(_) => {
-                                app.set_default_webcam(new_idx);
-                                app.cleanup_webcam_if_unused();
-                            }
-                            Err(e) => {
-                                log::error!("Failed to switch obstacle webcam device: {e}");
-                                app.status_error = Some((
-                                    format!("Camera failed: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                                app.refresh_webcam_devices();
-                            }
+                        if let Err(e) = app.switch_obstacle_webcam(new_idx) {
+                            log::error!("Failed to switch obstacle webcam device: {e}");
+                            app.status_error = Some((e, std::time::Instant::now()));
                         }
                     }
                 }
 
                 // Drain obstacle file dialog result (non-blocking)
-                if let Some(ref rx) = self.obstacle_dialog_rx {
-                    if let Ok(path) = rx.try_recv() {
-                        self.obstacle_dialog_rx = None;
-                        let ext = path
-                            .extension()
-                            .map(|e| e.to_string_lossy().to_lowercase())
-                            .unwrap_or_default();
-                        let is_model = matches!(ext.as_str(), "glb" | "gltf" | "ply" | "splat");
-                        if is_model {
-                            let path_str = path.to_string_lossy().to_string();
-                            if let Some(layer) = app.layer_stack.active_mut() {
-                                if let Some(e) = layer.as_effect_mut() {
-                                    if let Some(ps) = &mut e.pass_executor.particle_system {
-                                        if let Err(err) =
-                                            ps.set_obstacle_model(&app.gpu.device, &path)
-                                        {
-                                            log::error!("Failed to load obstacle model: {err}");
-                                            app.status_error = Some((
-                                                format!("Model load failed: {err}"),
-                                                std::time::Instant::now(),
-                                            ));
-                                        } else {
-                                            log::info!("Loaded obstacle model: {path_str}");
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            match image::open(&path) {
-                                Ok(img) => {
-                                    let rgba = img.to_rgba8();
-                                    let (w, h) = rgba.dimensions();
-                                    let path_str = path.to_string_lossy().to_string();
-                                    if let Some(layer) = app.layer_stack.active_mut() {
-                                        if let Some(e) = layer.as_effect_mut() {
-                                            if let Some(ps) = &mut e.pass_executor.particle_system {
-                                                ps.set_obstacle_image(
-                                                    &app.gpu.device,
-                                                    &app.gpu.queue,
-                                                    &rgba,
-                                                    w,
-                                                    h,
-                                                    Some(path_str),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => log::error!("Failed to load obstacle image: {e}"),
-                            }
-                        }
-                        // Stop depth thread + webcam if switching away from depth/webcam source
-                        #[cfg(feature = "depth")]
-                        {
-                            app.depth_thread = None;
-                        }
-                        #[cfg(feature = "webcam")]
-                        app.cleanup_webcam_if_unused();
-                        app.preset_store.mark_dirty();
+                let picked = self
+                    .obstacle_dialog_rx
+                    .as_ref()
+                    .and_then(|rx| rx.try_recv().ok());
+                if let Some(path) = picked {
+                    self.obstacle_dialog_rx = None;
+                    let layer = app.layer_stack.active_layer;
+                    if let Err(e) = app.load_obstacle_file(layer, &path) {
+                        log::error!("{e}");
+                        app.status_error = Some((e, std::time::Instant::now()));
                     }
                 }
 
@@ -3190,18 +2428,8 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("add_webcam_layer")));
                     if add_webcam.is_some() {
-                        // Listed afresh, so a camera plugged in (or a virtual
-                        // camera started) since launch can be added.
-                        app.refresh_webcam_devices();
-                        match app.webcam_for_new_layer() {
-                            Some(name) => {
-                                app.add_webcam_layer(&name);
-                                app.preset_store.mark_dirty();
-                            }
-                            None => {
-                                app.status_error =
-                                    Some(("No camera found".into(), std::time::Instant::now()));
-                            }
+                        if let Err(e) = app.webcam_add_layer(None) {
+                            app.status_error = Some((e, std::time::Instant::now()));
                         }
                     }
 
@@ -3212,37 +2440,9 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("switch_webcam_device")));
                     if let Some(new_idx) = switch_device {
-                        let started = app
-                            .webcam_device_name(new_idx)
-                            .ok_or_else(|| "Camera is no longer connected".to_string())
-                            .and_then(|name| app.ensure_webcam(&name).map(|_| name));
-                        match started {
-                            Ok(device_name) => {
-                                if let Some(m) = app
-                                    .layer_stack
-                                    .active_mut()
-                                    .and_then(|l| l.as_media_mut())
-                                    .filter(|m| m.is_live())
-                                {
-                                    m.set_live_device(&device_name);
-                                }
-                                // The pick becomes the default camera too,
-                                // unless that would move a particle source
-                                // or an obstacle to another camera.
-                                if !app.default_webcam_in_use() {
-                                    app.set_default_webcam(new_idx);
-                                }
-                                app.cleanup_webcam_if_unused();
-                                app.preset_store.mark_dirty();
-                            }
-                            Err(e) => {
-                                log::error!("Failed to switch webcam device: {e}");
-                                app.status_error = Some((
-                                    format!("Camera failed: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                                app.refresh_webcam_devices();
-                            }
+                        if let Err(e) = app.webcam_switch(app.layer_stack.active_layer, new_idx) {
+                            app.status_error =
+                                Some((format!("Camera failed: {e}"), std::time::Instant::now()));
                         }
                     }
 
@@ -3251,11 +2451,7 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("webcam_mirror")));
                     if let Some(mirror) = webcam_mirror {
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(m) = layer.as_media_mut() {
-                                m.set_mirror(&app.gpu.queue, mirror);
-                            }
-                        }
+                        let _ = app.webcam_mirror(app.layer_stack.active_layer, mirror);
                     }
 
                     let webcam_disconnect: Option<bool> = app
@@ -3263,181 +2459,57 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("webcam_disconnect")));
                     if webcam_disconnect.is_some() {
-                        // Remove the active webcam layer; its camera stops
-                        // unless another layer shows it too.
-                        let active = app.layer_stack.active_layer;
-                        app.remove_layer(active);
-                        app.sync_active_layer();
-                        app.cleanup_webcam_if_unused();
-                        app.preset_store.mark_dirty();
+                        // Its camera stops unless another layer shows it too.
+                        let _ = app.layer_remove(app.layer_stack.active_layer);
                     }
                 }
 
-                // Handle media transport signals
-                let play_pause: Option<bool> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_play_pause")));
-                if play_pause.is_some() {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.playing = !m.transport.playing;
-                        }
-                    }
-                }
-                let media_loop: Option<bool> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_loop")));
-                if let Some(looping) = media_loop {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.looping = looping;
-                        }
-                    }
-                }
-                let media_speed: Option<f32> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_speed")));
-                if let Some(speed) = media_speed {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.speed = speed;
-                        }
-                    }
-                }
-                let media_direction: Option<u8> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_direction")));
-                if let Some(dir) = media_direction {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.transport.direction = match dir {
-                                0 => crate::media::types::PlayDirection::Forward,
-                                1 => crate::media::types::PlayDirection::Reverse,
-                                2 => crate::media::types::PlayDirection::PingPong,
-                                _ => crate::media::types::PlayDirection::Forward,
-                            };
-                        }
+                // Handle media transport signals (on the active layer)
+                {
+                    use fosfora_app::control::ops::layer::TransportEdit;
+                    use fosfora_app::media::types::PlayDirection;
+                    let ctx = app.egui_overlay.context();
+                    let play_pause: Option<bool> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_play_pause")));
+                    let direction: Option<u8> =
+                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_direction")));
+                    let edit = TransportEdit {
+                        toggle: play_pause.is_some(),
+                        looping: ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_loop"))),
+                        speed: ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_speed"))),
+                        direction: direction.map(|dir| match dir {
+                            1 => PlayDirection::Reverse,
+                            2 => PlayDirection::PingPong,
+                            _ => PlayDirection::Forward,
+                        }),
+                        seek_secs: ctx.data_mut(|d| d.remove_temp(egui::Id::new("media_seek"))),
+                        playing: None,
+                    };
+                    if edit != TransportEdit::default() {
+                        let _ = app.media_transport_edit(app.layer_stack.active_layer, &edit);
                     }
                 }
 
-                // Handle media seek signal (video scrubber)
-                let media_seek: Option<f64> = app
-                    .egui_overlay
-                    .context()
-                    .data_mut(|d| d.remove_temp(egui::Id::new("media_seek")));
-                if let Some(secs) = media_seek {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if let Some(m) = layer.as_media_mut() {
-                            m.seek_to_secs(secs);
-                        }
-                    }
-                }
-
-                // Handle particle panel signals
+                // Handle particle panel signals (emission params; a user effect's
+                // file is updated too, built-ins stay runtime-only)
                 {
                     let ctx = app.egui_overlay.context();
-                    let emit_rate: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate")));
-                    let burst: Option<u32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst")));
-                    let lifetime: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime")));
-                    let speed: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed")));
-                    let size: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size")));
-                    let drag: Option<f32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag")));
-                    let trail_length: Option<u32> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_trail_length")));
-
-                    let mut particle_save_info: Option<(usize, gpu::particle::types::ParticleDef)> =
-                        None;
-                    if emit_rate.is_some()
-                        || burst.is_some()
-                        || lifetime.is_some()
-                        || speed.is_some()
-                        || size.is_some()
-                        || drag.is_some()
-                        || trail_length.is_some()
-                    {
-                        // Panel edit → preset is now unsaved (particle-sim edits
-                        // round-trip via LayerPreset.particle_sim).
-                        app.preset_store.mark_dirty();
-                        // Needed only by the trail-length branch below, which
-                        // reallocates the trail buffer.
-                        let device = app.gpu.device.clone();
-                        let hdr = crate::gpu::GpuContext::hdr_format();
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(effect) = layer.as_effect_mut() {
-                                let eidx = effect.effect_index;
-                                if let Some(ps) = effect.pass_executor.particle_system.as_mut() {
-                                    if let Some(v) = emit_rate {
-                                        ps.emit_rate = v;
-                                        ps.def.emit_rate = v;
-                                    }
-                                    if let Some(v) = burst {
-                                        ps.burst_on_beat = v;
-                                        ps.def.burst_on_beat = v;
-                                    }
-                                    if let Some(v) = lifetime {
-                                        ps.def.lifetime = v;
-                                    }
-                                    if let Some(v) = speed {
-                                        ps.def.initial_speed = v;
-                                    }
-                                    if let Some(v) = size {
-                                        ps.def.initial_size = v;
-                                    }
-                                    if let Some(v) = drag {
-                                        ps.def.drag = v;
-                                    }
-                                    if let Some(v) = trail_length {
-                                        // Keep def in sync (drives disk-save +
-                                        // preset capture) and reallocate the trail
-                                        // buffer; the per-frame uniform sync then
-                                        // shows the new length live.
-                                        ps.def.trail_length = v;
-                                        ps.set_trail_length(&device, hdr, v);
-                                    }
-                                    if let Some(idx) = eidx {
-                                        particle_save_info = Some((idx, ps.def.clone()));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Persist particle changes to disk for user effects only.
-                    // Built-in effects are runtime-only; users should create a
-                    // preset or copy the effect to persist changes.
-                    if let Some((idx, updated_def)) = particle_save_info {
-                        // Capture failures locally; can't touch app.status_error
-                        // while effect_loader is mutably borrowed.
-                        let mut save_err: Option<String> = None;
-                        if let Some(effect) = app.effect_loader.effects.get_mut(idx) {
-                            if !EffectLoader::is_builtin(effect) {
-                                effect.particles = Some(updated_def);
-                                if let Some(ref path) = effect.source_path {
-                                    if let Ok(json) = serde_json::to_string_pretty(effect) {
-                                        if let Err(e) = std::fs::write(path, json) {
-                                            save_err = Some(e.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(e) = save_err {
-                            log::error!("Effect save failed: {e}");
-                            app.status_error = Some((
-                                format!("Effect save failed: {e}"),
-                                std::time::Instant::now(),
-                            ));
-                        }
+                    let edit = fosfora_app::control::ops::particle::SimEdit {
+                        emit_rate: ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_emit_rate"))),
+                        burst: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_burst"))),
+                        lifetime: ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_lifetime"))),
+                        speed: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_speed"))),
+                        size: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_size"))),
+                        drag: ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_drag"))),
+                        trail_length: ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_trail_length"))),
+                    };
+                    let layer = app.layer_stack.active_layer;
+                    if let Err(e) = app.apply_particle_sim(layer, &edit) {
+                        log::error!("{e}");
+                        app.status_error = Some((e, std::time::Instant::now()));
                     }
                 }
 
@@ -3446,60 +2518,36 @@ impl ApplicationHandler for FosforaApp {
                     let ctx = app.egui_overlay.context();
                     // The layer asking is the one live NOW, not whichever is active
                     // when the dialog returns (#2012).
-                    let base_request = crate::gpu::particle::SourceRequest {
-                        layer_idx: app.layer_stack.active_layer,
-                        ..Default::default()
-                    };
+                    let layer = app.layer_stack.active_layer;
 
-                    // Select built-in raster image
-                    let select_builtin: Option<String> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_select_builtin")));
-                    if let Some(name) = select_builtin {
-                        if !app.particle_source_loader.is_loading() {
-                            let path = crate::gpu::particle::builtin_raster_path(&name);
-                            if let Err(e) =
-                                app.particle_source_loader.load_image(path, base_request)
-                            {
-                                log::error!("Failed to spawn particle source loader thread: {e}");
-                            }
-                            app.preset_store.mark_dirty();
-                        }
-                    }
-
-                    // Load image as particle source (dialog + decode on background thread)
-                    let load_image: Option<bool> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_image")));
-                    if load_image.is_some() && !app.particle_source_loader.is_loading() {
-                        if let Err(e) = app.particle_source_loader.open_image_dialog(base_request) {
-                            log::error!("Failed to spawn particle source dialog thread: {e}");
-                        }
-                        app.preset_store.mark_dirty();
-                    }
-
-                    // Load video as particle source (dialog + decode on background thread)
-                    #[cfg(feature = "video")]
+                    // Source picks: a built-in picture, or a file dialog.
                     {
+                        use fosfora_app::control::ops::particle::{MediaKind, SourceLoad};
+                        let select_builtin: Option<String> = ctx
+                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_select_builtin")));
+                        let load_image: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_image")));
+                        #[cfg(feature = "video")]
                         let load_video: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_video")));
-                        if load_video.is_some() && !app.particle_source_loader.is_loading() {
-                            if let Err(e) =
-                                app.particle_source_loader.open_video_dialog(base_request)
-                            {
-                                log::error!("Failed to spawn particle source dialog thread: {e}");
+                        #[cfg(not(feature = "video"))]
+                        let load_video: Option<bool> = None;
+                        let load_model: Option<bool> =
+                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_model")));
+                        let file = |v: Option<bool>, kind| {
+                            v.map(|_| SourceLoad::File { kind, path: None })
+                        };
+                        let picks = [
+                            select_builtin.map(SourceLoad::Builtin),
+                            file(load_image, MediaKind::Image),
+                            file(load_video, MediaKind::Video),
+                            file(load_model, MediaKind::Model),
+                        ];
+                        for load in picks.into_iter().flatten() {
+                            if let Err(e) = app.load_particle_source(layer, load) {
+                                log::error!("Particle source: {e}");
                             }
-                            app.preset_store.mark_dirty();
                         }
-                    }
-
-                    // Load a 3D model as particle source (#1993). Dialog only on the
-                    // background thread; the raster happens where the device lives.
-                    let load_model: Option<bool> =
-                        ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_load_model")));
-                    if load_model.is_some() && !app.particle_source_loader.is_loading() {
-                        if let Err(e) = app.particle_source_loader.open_model_dialog(base_request) {
-                            log::error!("Failed to spawn particle source dialog thread: {e}");
-                        }
-                        app.preset_store.mark_dirty();
                     }
 
                     // Model pose changed — re-raster and re-sample the live model.
@@ -3507,86 +2555,39 @@ impl ApplicationHandler for FosforaApp {
                     // per adjustment rather than once per drag frame.
                     let model_pose: Option<[f32; 9]> =
                         ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_model_pose")));
-                    if let Some(pose) = model_pose {
-                        let def = crate::gpu::particle::types::ModelSampleDef {
-                            yaw_degrees: pose[0],
-                            pitch_degrees: pose[1],
-                            scale: pose[2],
-                            ambient: pose[3],
-                            light_mix: pose[4],
-                            light_x: pose[5],
-                            light_y: pose[6],
-                            light_z: pose[7],
-                            ray_strength: pose[8],
+                    if let Some(p) = model_pose {
+                        let pose = crate::gpu::particle::types::ModelSampleDef {
+                            yaw_degrees: p[0],
+                            pitch_degrees: p[1],
+                            scale: p[2],
+                            ambient: p[3],
+                            light_mix: p[4],
+                            light_x: p[5],
+                            light_y: p[6],
+                            light_z: p[7],
+                            ray_strength: p[8],
                         };
-                        let (device, queue) = (&app.gpu.device, &app.gpu.queue);
-                        if let Some(ps) = app
-                            .layer_stack
-                            .active_mut()
-                            .and_then(|l| l.as_effect_mut())
-                            .and_then(|e| e.pass_executor.particle_system.as_mut())
-                        {
-                            // Only a live model source re-samples on a pose change. A
-                            // stale path here is what put the model back over a picture
-                            // the user had just loaded (#2011).
-                            if let crate::gpu::particle::ParticleSource::Model { path } = &ps.source
-                            {
-                                let path = path.clone();
-                                match ps.apply_model_source(
-                                    device,
-                                    queue,
-                                    std::path::Path::new(&path),
-                                    &def,
-                                ) {
-                                    Ok(n) => {
-                                        log::info!("Re-sampled model at new pose: {n} particles");
-                                    }
-                                    Err(e) => log::warn!("Model re-sample failed: {e}"),
-                                }
-                            }
+                        match app.set_particle_model_pose(layer, &pose) {
+                            Ok(n) => log::info!("Re-sampled model at new pose: {n} particles"),
+                            Err(e) => log::warn!("Model re-sample failed: {e}"),
                         }
-                        app.preset_store.mark_dirty();
                     }
 
                     // Splat scene picker + demo download (#1800)
                     {
                         let load_scene: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("splat_load_scene")));
-                        if load_scene.is_some() && !app.splat_loader.loading {
-                            // The runtime override lives in ParticleSystem
-                            // state (the .pfx stays read-only); the load
-                            // needs the active layer's splat transform.
-                            let job = app
-                                .layer_stack
-                                .active()
-                                .and_then(|l| l.as_effect())
-                                .and_then(|e| e.pass_executor.particle_system.as_ref())
-                                .and_then(|ps| {
-                                    ps.def.splat.as_ref().map(|s| {
-                                        (
-                                            ps.max_particles,
-                                            crate::gpu::particle::splat_source::SceneOptions::from(
-                                                s,
-                                            ),
-                                        )
-                                    })
-                                });
-                            if let Some((target, opts)) = job {
-                                app.splat_loader.open_dialog(
-                                    target,
-                                    opts,
-                                    app.layer_stack.active_layer,
-                                );
-                                app.preset_store.mark_dirty();
+                        if load_scene.is_some() {
+                            if let Err(e) = app.splat_load_scene(layer, None) {
+                                log::warn!("Splat scene: {e}");
                             }
                         }
-
                         let dl_demo: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("splat_download_demo")));
-                        if dl_demo.is_some() && app.splat_demo_download.is_none() {
-                            app.splat_demo_download = Some(
-                                crate::gpu::particle::splat_source::download_demo_scene("default"),
-                            );
+                        if dl_demo.is_some() {
+                            if let Err(e) = app.splat_download_demo() {
+                                log::info!("Splat demo: {e}");
+                            }
                         }
                     }
 
@@ -3645,343 +2646,94 @@ impl ApplicationHandler for FosforaApp {
                             .data_mut(|d| d.remove_temp(egui::Id::new("particle_webcam_device")));
                         if use_webcam.is_some() || device.is_some() {
                             let layer = app.layer_stack.active_layer;
-                            if let Err(e) = app.set_particle_webcam(layer, device) {
+                            if let Err(e) = app.use_particle_webcam(layer, device) {
                                 log::error!("Failed to start webcam: {e}");
                                 app.status_error = Some((
                                     format!("Webcam failed: {e}"),
                                     std::time::Instant::now(),
                                 ));
                             }
-                            app.cleanup_webcam_if_unused();
-                            app.preset_store.mark_dirty();
                         }
                     }
 
                     // Video transport controls
                     #[cfg(feature = "video")]
                     {
-                        let playing: Option<bool> = ctx
-                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_playing")));
-                        let looping: Option<bool> = ctx
-                            .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_looping")));
-                        let speed: Option<f32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_video_speed")));
-                        let seek: Option<f64> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("particle_video_seek")));
-                        if playing.is_some()
-                            || looping.is_some()
-                            || speed.is_some()
-                            || seek.is_some()
-                        {
-                            if let Some(layer) = app.layer_stack.active_mut() {
-                                if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
-                                    {
-                                        if let Some(playback) = ps.source.playback_mut() {
-                                            if let Some(v) = playing {
-                                                playback.playing = v;
-                                            }
-                                            if let Some(v) = looping {
-                                                playback.looping = v;
-                                            }
-                                            if let Some(v) = speed {
-                                                playback.speed = v;
-                                            }
-                                        }
-                                        if let Some(v) = seek {
-                                            ps.source.seek_to_secs(v);
-                                        }
-                                    }
-                                }
-                            }
-                            if looping.is_some() || speed.is_some() {
-                                app.preset_store.mark_dirty();
+                        let edit = fosfora_app::control::ops::particle::VideoEdit {
+                            playing: ctx.data_mut(|d| {
+                                d.remove_temp(egui::Id::new("particle_video_playing"))
+                            }),
+                            looping: ctx.data_mut(|d| {
+                                d.remove_temp(egui::Id::new("particle_video_looping"))
+                            }),
+                            speed: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_speed"))),
+                            seek: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("particle_video_seek"))),
+                        };
+                        if !edit.is_empty() {
+                            let layer = app.layer_stack.active_layer;
+                            if let Err(e) = app.edit_particle_video(layer, &edit) {
+                                log::debug!("Particle video: {e}");
                             }
                         }
                     }
 
-                    // Morph controls
+                    // Morph controls: one frame of panel edits, applied by
+                    // App::apply_morph (also the particle/morph-* ops).
                     {
-                        let morph_trigger: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_trigger_target")));
-                        let morph_cycle: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_auto_cycle")));
-                        let morph_hold: Option<f32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_hold_duration")));
-                        let morph_style: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_style")));
-                        let morph_load_img: Option<bool> =
+                        use fosfora_app::control::ops::particle::{MediaKind, MorphEdit};
+                        let flag = |v: Option<bool>| v.is_some();
+                        let mut edit = MorphEdit {
+                            trigger: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_trigger_target"))),
+                            auto_cycle: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_auto_cycle"))),
+                            hold: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_hold_duration"))),
+                            style: ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_style"))),
+                            set_source: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_set_source"))),
+                            blend: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_manual_blend"))),
+                            clear_slot: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_clear_slot"))),
+                            add_geometry: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_add_geometry"))),
+                            add_text: ctx
+                                .data_mut(|d| d.remove_temp(egui::Id::new("morph_add_text"))),
+                            snapshot: flag(
+                                ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_snapshot"))),
+                            ),
+                            load: None,
+                        };
+                        let load_image: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_image")));
-                        let morph_add_geo: Option<String> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_add_geometry")));
-                        let morph_add_text: Option<String> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_add_text")));
-                        let morph_load_video: Option<bool> =
+                        let load_video: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_video")));
-                        let morph_load_model: Option<bool> =
+                        let load_model: Option<bool> =
                             ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_load_model")));
-                        let morph_snapshot: Option<bool> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_snapshot")));
-                        let morph_clear_slot: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_clear_slot")));
-                        let morph_manual_blend: Option<f32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_manual_blend")));
-                        let morph_set_source: Option<u32> =
-                            ctx.data_mut(|d| d.remove_temp(egui::Id::new("morph_set_source")));
-                        // Read the selected slot for targeting (don't remove — UI manages it)
-                        let morph_selected_slot: Option<u32> =
+                        edit.load = [
+                            (load_image, MediaKind::Image),
+                            (load_video, MediaKind::Video),
+                            (load_model, MediaKind::Model),
+                        ]
+                        .into_iter()
+                        .find(|(v, _)| v.is_some())
+                        .map(|(_, kind)| (kind, None));
+                        // The selected slot is the UI's; it is cleared once used.
+                        let selected: Option<u32> =
                             ctx.data(|d| d.get_temp(egui::Id::new("morph_selected_slot")));
-
-                        if morph_trigger.is_some()
-                            || morph_cycle.is_some()
-                            || morph_hold.is_some()
-                            || morph_style.is_some()
-                            || morph_load_img.is_some()
-                            || morph_add_geo.is_some()
-                            || morph_add_text.is_some()
-                            || morph_load_video.is_some()
-                            || morph_load_model.is_some()
-                            || morph_snapshot.is_some()
-                            || morph_clear_slot.is_some()
-                            || morph_manual_blend.is_some()
-                            || morph_set_source.is_some()
-                        {
-                            if let Some(layer) = app.layer_stack.active_mut() {
-                                if let Some(effect) = layer.as_effect_mut() {
-                                    if let Some(ps) = effect.pass_executor.particle_system.as_mut()
-                                    {
-                                        let needs_upload = if let Some(ref mut morph) =
-                                            ps.morph_state
-                                        {
-                                            if let Some(target) = morph_trigger {
-                                                morph.trigger_morph(target);
-                                            }
-                                            if let Some(mode) = morph_cycle {
-                                                morph.auto_cycle = match mode {
-                                                    0 => crate::gpu::particle::morph::AutoCycle::Off,
-                                                    1 => crate::gpu::particle::morph::AutoCycle::OnBeat,
-                                                    _ => crate::gpu::particle::morph::AutoCycle::Timed(4.0),
-                                                };
-                                            }
-                                            if let Some(hold) = morph_hold {
-                                                morph.hold_duration = hold;
-                                            }
-                                            if let Some(style) = morph_style {
-                                                morph.transition_style = style;
-                                            }
-                                            if let Some(src) = morph_set_source {
-                                                morph.source_index =
-                                                    src.min(morph.target_count.saturating_sub(1));
-                                            }
-                                            if let Some(progress) = morph_manual_blend {
-                                                // Manual scrub: set progress directly, mark transitioning so shader interpolates
-                                                morph.progress = progress;
-                                                morph.transitioning = progress < 1.0;
-                                                // Reset hold timer so auto-cycle doesn't immediately fire
-                                                morph.hold_timer = 0.0;
-                                            }
-                                            // Helper: pick target slot — selected slot, or next empty (based on def count), or last
-                                            let def_count = ps
-                                                .def
-                                                .morph_targets
-                                                .as_ref()
-                                                .map_or(0, |t| t.len() as u32);
-                                            let pick_slot = || -> u32 {
-                                                if let Some(s) = morph_selected_slot {
-                                                    s.min(3)
-                                                } else {
-                                                    def_count.min(3)
-                                                }
-                                            };
-                                            let mut needs_upload = false;
-
-                                            // Clear slot — shift data + labels to fill the gap
-                                            if let Some(clear) = morph_clear_slot {
-                                                let slot = clear.min(3);
-                                                morph.remove_target(slot);
-                                                if let Some(ref mut targets) = ps.def.morph_targets
-                                                {
-                                                    if (slot as usize) < targets.len() {
-                                                        targets.remove(slot as usize);
-                                                    }
-                                                }
-                                                needs_upload = true;
-                                            }
-
-                                            if let Some(shape) = morph_add_geo {
-                                                let slot = pick_slot();
-                                                let data =
-                                                    crate::gpu::particle::morph::generate_geometry(
-                                                        &shape,
-                                                        ps.max_particles,
-                                                        ps.def.initial_size,
-                                                    );
-                                                morph.load_target(slot, data);
-                                                let def =
-                                                    crate::gpu::particle::types::MorphTargetDef {
-                                                        source: format!("geometry:{}", shape),
-                                                        color: None,
-                                                    };
-                                                if let Some(ref mut targets) = ps.def.morph_targets
-                                                {
-                                                    while targets.len() <= slot as usize {
-                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
-                                                            source: String::new(), color: None,
-                                                        });
-                                                    }
-                                                    targets[slot as usize] = def;
-                                                }
-                                                needs_upload = true;
-                                            }
-                                            if let Some(ref text) = morph_add_text {
-                                                let slot = pick_slot();
-                                                let data = crate::gpu::particle::text_source::render_text_to_particles(
-                                                    text,
-                                                    ps.max_particles,
-                                                    ps.def.initial_size,
-                                                );
-                                                if !data.is_empty() {
-                                                    morph.load_target(slot, data);
-                                                    let def = crate::gpu::particle::types::MorphTargetDef {
-                                                        source: format!("text:{}", text),
-                                                        color: None,
-                                                    };
-                                                    if let Some(ref mut targets) =
-                                                        ps.def.morph_targets
-                                                    {
-                                                        while targets.len() <= slot as usize {
-                                                            targets.push(crate::gpu::particle::types::MorphTargetDef {
-                                                                source: String::new(), color: None,
-                                                            });
-                                                        }
-                                                        targets[slot as usize] = def;
-                                                    }
-                                                    log::info!(
-                                                        "Loaded morph text target into slot {}: \"{}\"",
-                                                        slot,
-                                                        text
-                                                    );
-                                                    needs_upload = true;
-                                                }
-                                            }
-                                            needs_upload
-                                        } else {
-                                            false
-                                        };
-                                        if needs_upload {
-                                            ps.upload_morph_targets(
-                                                &app.gpu.device,
-                                                &app.gpu.queue,
-                                            );
-                                            ctx.data_mut(|d| {
-                                                d.remove_temp::<u32>(egui::Id::new(
-                                                    "morph_selected_slot",
-                                                ))
-                                            });
-                                        }
-                                        // Snapshot needs &self on ps, so do it outside the morph borrow
-                                        if morph_snapshot.is_some() {
-                                            let slot = if let Some(s) = morph_selected_slot {
-                                                s.min(3)
-                                            } else {
-                                                // Use def count to stay in sync with morph_targets vec
-                                                (ps.def
-                                                    .morph_targets
-                                                    .as_ref()
-                                                    .map_or(0, |t| t.len())
-                                                    as u32)
-                                                    .min(3)
-                                            };
-                                            let data = ps.snapshot_particles(
-                                                &app.gpu.device,
-                                                &app.gpu.queue,
-                                            );
-                                            if !data.is_empty() {
-                                                if let Some(ref mut morph) = ps.morph_state {
-                                                    morph.load_target(slot, data);
-                                                }
-                                                let def =
-                                                    crate::gpu::particle::types::MorphTargetDef {
-                                                        source: "snapshot".to_string(),
-                                                        color: None,
-                                                    };
-                                                if let Some(ref mut targets) = ps.def.morph_targets
-                                                {
-                                                    while targets.len() <= slot as usize {
-                                                        targets.push(crate::gpu::particle::types::MorphTargetDef {
-                                                            source: String::new(), color: None,
-                                                        });
-                                                    }
-                                                    targets[slot as usize] = def;
-                                                }
-                                                ps.upload_morph_targets(
-                                                    &app.gpu.device,
-                                                    &app.gpu.queue,
-                                                );
-                                                log::info!(
-                                                    "Loaded morph snapshot into slot {}",
-                                                    slot
-                                                );
-                                            }
-                                            ctx.data_mut(|d| {
-                                                d.remove_temp::<u32>(egui::Id::new(
-                                                    "morph_selected_slot",
-                                                ))
-                                            });
-                                        }
-                                        // "Which layer, which slot, is this a morph
-                                        // target" all ride with the request now, so a
-                                        // layer or slot change while the dialog is open
-                                        // cannot redirect the result (#2012).
-                                        let morph_request = crate::gpu::particle::SourceRequest {
-                                            layer_idx: app.layer_stack.active_layer,
-                                            as_morph_target: true,
-                                            morph_slot: morph_selected_slot,
-                                            ..Default::default()
-                                        };
-                                        let clear_slot = || {
-                                            ctx.data_mut(|d| {
-                                                d.remove_temp::<u32>(egui::Id::new(
-                                                    "morph_selected_slot",
-                                                ))
-                                            });
-                                        };
-                                        if morph_load_img.is_some() {
-                                            clear_slot();
-                                            if let Err(e) = app
-                                                .particle_source_loader
-                                                .open_image_dialog(morph_request)
-                                            {
-                                                log::error!(
-                                                    "Failed to spawn particle source dialog thread: {e}"
-                                                );
-                                            }
-                                        }
-                                        #[cfg(feature = "video")]
-                                        if morph_load_video.is_some() {
-                                            clear_slot();
-                                            if let Err(e) = app
-                                                .particle_source_loader
-                                                .open_video_dialog(morph_request)
-                                            {
-                                                log::error!(
-                                                    "Failed to spawn particle source dialog thread: {e}"
-                                                );
-                                            }
-                                        }
-                                        if morph_load_model.is_some() {
-                                            clear_slot();
-                                            if let Err(e) = app
-                                                .particle_source_loader
-                                                .open_model_dialog(morph_request)
-                                            {
-                                                log::error!(
-                                                    "Failed to spawn particle source dialog thread: {e}"
-                                                );
-                                            }
-                                        }
-                                    }
+                        if !edit.is_empty() {
+                            let layer = app.layer_stack.active_layer;
+                            match app.apply_morph(layer, &edit, selected) {
+                                Ok(true) => {
+                                    ctx.data_mut(|d| {
+                                        d.remove_temp::<u32>(egui::Id::new("morph_selected_slot"))
+                                    });
                                 }
+                                Ok(false) => {}
+                                Err(e) => log::warn!("Morph: {e}"),
                             }
                         }
                     }
@@ -4318,14 +3070,14 @@ impl ApplicationHandler for FosforaApp {
                     }
                 }
 
-                // Handle layer UI signals
+                // Handle layer UI signals (refusals do nothing, as before)
+                use fosfora_app::control::ops::layer::LayerEdit;
                 let add_layer: Option<bool> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("add_layer")));
                 if add_layer.is_some() {
-                    app.add_layer();
-                    app.preset_store.mark_dirty();
+                    let _ = app.layer_add();
                 }
 
                 let remove_layer: Option<usize> = app
@@ -4333,12 +3085,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("remove_layer")));
                 if let Some(idx) = remove_layer {
-                    // App::remove_layer, not layer_stack's — it carries the
-                    // bindings with the renumbering (#2026).
-                    app.remove_layer(idx);
-                    app.preset_store.mark_dirty();
-                    #[cfg(feature = "webcam")]
-                    app.cleanup_webcam_if_unused();
+                    let _ = app.layer_remove(idx);
                 }
 
                 // Handle clear all layers
@@ -4347,10 +3094,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("clear_all_layers")));
                 if clear_all.is_some() {
-                    app.clear_all_layers();
-                    #[cfg(feature = "webcam")]
-                    app.cleanup_webcam_if_unused();
-                    app.preset_store.mark_dirty();
+                    app.layer_clear();
                 }
 
                 // Handle layer rename
@@ -4358,11 +3102,12 @@ impl ApplicationHandler for FosforaApp {
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_rename")));
-                if let Some((idx, new_name)) = layer_rename {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        layer.custom_name = new_name;
-                        app.preset_store.mark_dirty();
-                    }
+                if let Some((idx, name)) = layer_rename {
+                    let edit = LayerEdit {
+                        name: Some(name),
+                        ..LayerEdit::default()
+                    };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
                 let select_layer: Option<usize> = app
@@ -4370,10 +3115,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("select_layer")));
                 if let Some(idx) = select_layer {
-                    if idx < app.layer_stack.layers.len() {
-                        app.layer_stack.active_layer = idx;
-                        app.sync_active_layer();
-                    }
+                    app.layer_select(idx);
                 }
 
                 // The Master row's badge: the canvas, on the master tab.
@@ -4382,8 +3124,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("open_trama_on_master")));
                 if open_master == Some(true) {
-                    app.trama.canvas_target = crate::trama::CanvasTarget::Master;
-                    app.trama.canvas_open = true;
+                    app.open_trama_on_master();
                 }
 
                 // A layer row's trama badge: select that layer and put the
@@ -4393,12 +3134,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("open_trama_on_layer")));
                 if let Some(idx) = open_trama {
-                    if idx < app.layer_stack.layers.len() {
-                        app.layer_stack.active_layer = idx;
-                        app.sync_active_layer();
-                        app.trama.canvas_target = crate::trama::CanvasTarget::SelectedLayer;
-                        app.trama.canvas_open = true;
-                    }
+                    app.open_trama_on_layer(idx);
                 }
 
                 // Handle lock/pin toggles
@@ -4407,10 +3143,11 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_lock")));
                 if let Some((idx, locked)) = toggle_lock {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        layer.locked = locked;
-                        app.preset_store.mark_dirty();
-                    }
+                    let edit = LayerEdit {
+                        locked: Some(locked),
+                        ..LayerEdit::default()
+                    };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
                 let toggle_pin: Option<(usize, bool)> = app
@@ -4418,49 +3155,34 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_pin")));
                 if let Some((idx, pinned)) = toggle_pin {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        layer.pinned = pinned;
-                        app.preset_store.mark_dirty();
-                    }
+                    let edit = LayerEdit {
+                        pinned: Some(pinned),
+                        ..LayerEdit::default()
+                    };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
+                // Blend, opacity and displace act on the active layer.
                 let layer_blend: Option<u32> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_blend")));
-                if let Some(mode_u32) = layer_blend {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if !layer.locked {
-                            layer.blend_mode = BlendMode::from_u32(mode_u32);
-                            app.preset_store.mark_dirty();
-                        }
-                    }
-                }
-
                 let layer_opacity: Option<f32> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_opacity")));
-                if let Some(opacity) = layer_opacity {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if !layer.locked {
-                            layer.opacity = opacity;
-                            app.preset_store.mark_dirty();
-                        }
-                    }
-                }
-
                 let layer_displace: Option<f32> = app
                     .egui_overlay
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_displace")));
-                if let Some(amount) = layer_displace {
-                    if let Some(layer) = app.layer_stack.active_mut() {
-                        if !layer.locked {
-                            layer.displace_amount = amount;
-                            app.preset_store.mark_dirty();
-                        }
-                    }
+                let look = LayerEdit {
+                    blend: layer_blend.map(BlendMode::from_u32),
+                    opacity: layer_opacity,
+                    displace: layer_displace,
+                    ..LayerEdit::default()
+                };
+                if look != LayerEdit::default() {
+                    let _ = app.layer_edit(app.layer_stack.active_layer, &look);
                 }
 
                 // The Master inspector's offer: this layer's effect's own
@@ -4470,8 +3192,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("adopt_layer_postprocess")));
                 if let Some(idx) = adopt_pp {
-                    app.adopt_layer_postprocess(idx);
-                    app.preset_store.mark_dirty();
+                    app.postfx_adopt(idx);
                 }
                 // Its other two resets: the settings before the last reset,
                 // and the defaults.
@@ -4495,8 +3216,7 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_move")));
                 if let Some((from, to)) = layer_move {
-                    app.move_layer(from, to);
-                    app.preset_store.mark_dirty();
+                    app.layer_move(from, to);
                 }
 
                 let toggle_enable: Option<(usize, bool)> = app
@@ -4504,12 +3224,11 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_enable")));
                 if let Some((idx, enabled)) = toggle_enable {
-                    if let Some(layer) = app.layer_stack.layers.get_mut(idx) {
-                        if !layer.locked {
-                            layer.enabled = enabled;
-                            app.preset_store.mark_dirty();
-                        }
-                    }
+                    let edit = LayerEdit {
+                        enabled: Some(enabled),
+                        ..LayerEdit::default()
+                    };
+                    let _ = app.layer_edit(idx, &edit);
                 }
 
                 // Check if active layer params changed (marks preset dirty + schedules .pfx save)
@@ -4597,96 +3316,7 @@ impl ApplicationHandler for FosforaApp {
                 triggers.append(&mut app.pending_osc_triggers);
                 triggers.append(&mut app.pending_web_triggers);
                 for trigger in triggers {
-                    use crate::midi::types::TriggerAction;
-                    // Build visible (non-hidden) effect indices for cycling
-                    let visible: Vec<usize> = app
-                        .effect_loader
-                        .effects
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, e)| !e.hidden)
-                        .map(|(i, _)| i)
-                        .collect();
-                    match trigger {
-                        TriggerAction::NextEffect if !visible.is_empty() => {
-                            let current = app
-                                .layer_stack
-                                .active()
-                                .and_then(|l| l.effect_index())
-                                .unwrap_or(0);
-                            let pos = visible.iter().position(|&i| i == current).unwrap_or(0);
-                            app.load_effect(visible[(pos + 1) % visible.len()]);
-                        }
-                        TriggerAction::PrevEffect if !visible.is_empty() => {
-                            let current = app
-                                .layer_stack
-                                .active()
-                                .and_then(|l| l.effect_index())
-                                .unwrap_or(0);
-                            let pos = visible.iter().position(|&i| i == current).unwrap_or(0);
-                            app.load_effect(
-                                visible[if pos == 0 { visible.len() - 1 } else { pos - 1 }],
-                            );
-                        }
-                        TriggerAction::TogglePostProcess => {
-                            app.post_process.enabled = !app.post_process.enabled;
-                            app.master_postprocess.enabled = app.post_process.enabled;
-                        }
-                        TriggerAction::ToggleOverlay => {
-                            app.egui_overlay.toggle_visible();
-                        }
-                        TriggerAction::NextPreset if !app.preset_store.presets.is_empty() => {
-                            let num = app.preset_store.presets.len();
-                            let current = app.target_preset().unwrap_or(0);
-                            app.switch_preset((current + 1) % num);
-                        }
-                        TriggerAction::PrevPreset if !app.preset_store.presets.is_empty() => {
-                            let num = app.preset_store.presets.len();
-                            let current = app.target_preset().unwrap_or(0);
-                            app.switch_preset(if current == 0 { num - 1 } else { current - 1 });
-                        }
-                        TriggerAction::NextLayer if app.layer_stack.layers.len() > 1 => {
-                            let num = app.layer_stack.layers.len();
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer = (current + 1) % num;
-                            app.sync_active_layer();
-                        }
-                        TriggerAction::PrevLayer if app.layer_stack.layers.len() > 1 => {
-                            let num = app.layer_stack.layers.len();
-                            let current = app.layer_stack.active_layer;
-                            app.layer_stack.active_layer =
-                                if current == 0 { num - 1 } else { current - 1 };
-                            app.sync_active_layer();
-                        }
-                        TriggerAction::SceneGoNext => {
-                            let event = app.timeline.go_next();
-                            app.process_timeline_event(event);
-                        }
-                        TriggerAction::SceneGoPrev => {
-                            let event = app.timeline.go_prev();
-                            app.process_timeline_event(event);
-                        }
-                        TriggerAction::TempoHalf => {
-                            app.audio
-                                .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(-1));
-                        }
-                        TriggerAction::TempoDouble => {
-                            app.audio
-                                .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(1));
-                        }
-                        TriggerAction::TempoTap => {
-                            app.audio.tap_tempo();
-                        }
-                        TriggerAction::ToggleTimeline => {
-                            if app.timeline.active {
-                                app.timeline.stop();
-                            } else if !app.timeline.cues.is_empty() {
-                                let event = app.timeline.start(0);
-                                app.process_timeline_event(event);
-                            }
-                        }
-                        _ => {}
-                    }
+                    app.run_trigger(trigger);
                 }
 
                 match app.render() {

@@ -176,10 +176,22 @@ pub fn draw_inspector(
 
         for def in defs {
             card_frame(ui).show(ui, |ui| match def {
-                ParamDef::Int { name, default, min, max } => {
-                    let mut value = match values.get(name) { Some(ParamValue::Float(v)) => *v as i32, _ => *default };
-                    if ui.add(egui::Slider::new(&mut value, *min..=*max).text(name)).changed() {
-                        values.insert(name.clone(), ParamValue::Float(value as f32)); *changed = true;
+                ParamDef::Int {
+                    name,
+                    default,
+                    min,
+                    max,
+                } => {
+                    let mut value = match values.get(name) {
+                        Some(ParamValue::Float(v)) => *v as i32,
+                        _ => *default,
+                    };
+                    if ui
+                        .add(egui::Slider::new(&mut value, *min..=*max).text(name))
+                        .changed()
+                    {
+                        values.insert(name.clone(), ParamValue::Float(value as f32));
+                        *changed = true;
                     }
                 }
                 ParamDef::Float {

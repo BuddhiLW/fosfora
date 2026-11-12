@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Added
+- **The embedded REPL drives everything the interface can.** In a `repl` build, `(preset/save! "Night Drive")`, `(scene/add-cue! "Tunnel")`, `(layer/blend! 0 :screen)`, `(trama/connect! ...)`, `(bind/add! ...)` and `(sys/record!)` reach presets, scenes and cues, layers, effect chains, bindings, outputs and recording, and each returns its result. `(f/help)` lists every action. Scripts in `~/.config/fosfora/repl/` load at startup. See `docs/REPL.md`.
 - **Sync offset.** When beat-bound visuals trail the sound in the room, Setup › Audio › Sync offset fires beats, downbeats and the beat and bar phases up to 200 ms early (capped just under half a beat); levels stay as they are. When the sound reaches the audience after the picture, a negative value of up to 250 ms holds every feature back. It also applies to `fosfora --signal`, and leaving it at 0 changes nothing.
 - **Zoom Blur node.** Streaks the picture toward and away from a point while the center stays sharp, the camera-rush look; put `onset` or `bass` on its `strength` to punch on the kick. `directional` turns it into a motion blur along an angle.
 - **Glitch node.** Tears the picture into sliding strips and jumping blocks with the colors pulled apart, drawing a new pattern up to 30 times a second. At `intensity` 0 the picture passes through untouched, so `onset` on `intensity` breaks it up on every hit and snaps back between them.

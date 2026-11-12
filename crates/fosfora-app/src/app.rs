@@ -123,6 +123,8 @@ pub struct App {
     // Web (WebSocket control surface)
     pub web: WebSystem,
     pub pending_web_triggers: Vec<TriggerAction>,
+    /// Every control op (UI actions by name), run by `run_control_ops`.
+    pub control: crate::control::Registry,
     // Binding bus
     pub binding_bus: BindingBus,
     // Presets
@@ -667,6 +669,7 @@ impl App {
             latest_audio: None,
             web,
             pending_web_triggers: Vec::new(),
+            control: crate::control::Registry::with_builtins(),
             binding_bus,
             preset_store,
             preset_loader: PresetLoader::new(),
@@ -1331,6 +1334,9 @@ impl App {
         for path in web_media_add {
             self.start_media_layer(path);
         }
+        // Control ops (REPL, addons) run after the remote's messages, so an
+        // op sees and may override this frame's remote changes.
+        self.run_control_ops();
 
         // Evaluate binding bus (runs after MIDI/OSC/WS drain — bus overrides direct mappings)
         self.binding_bus.ingest_ws_values(&self.web.bind_values);
@@ -2969,7 +2975,17 @@ impl App {
             .as_mut()
     }
 
+    /// Save the live stack as preset `name`, reporting a failure on the
+    /// status line.
     pub fn save_preset(&mut self, name: &str) {
+        if let Err(e) = self.try_save_preset(name) {
+            log::error!("Failed to save preset: {e}");
+            self.status_error = Some((format!("Failed to save preset: {e}"), Instant::now()));
+        }
+    }
+
+    /// Save the live stack as preset `name`; the saved preset's index.
+    pub fn try_save_preset(&mut self, name: &str) -> Result<usize> {
         let mut chains = crate::trama::persist::capture(&self.layer_stack, &self.trama);
         let mut layer_chains = std::mem::take(&mut chains.layers).into_iter();
         let layer_presets: Vec<LayerPreset> = self
@@ -3113,8 +3129,14 @@ impl App {
                     obstacle_model,
                     lattice,
                     helix,
-                    svg_offset_path: l.as_effect().and_then(|e| e.pass_executor.svg_offset.as_ref()).and_then(|s| s.path.clone()),
-                    svg_offset_settings: l.as_effect().and_then(|e| e.pass_executor.svg_offset.as_ref()).map(|s| s.settings.clone()),
+                    svg_offset_path: l
+                        .as_effect()
+                        .and_then(|e| e.pass_executor.svg_offset.as_ref())
+                        .and_then(|s| s.path.clone()),
+                    svg_offset_settings: l
+                        .as_effect()
+                        .and_then(|e| e.pass_executor.svg_offset.as_ref())
+                        .map(|s| s.settings.clone()),
                     particle_sim,
                     chain,
                 }
@@ -3124,8 +3146,7 @@ impl App {
         if layer_presets.iter().all(|l| {
             l.effect_name.is_empty() && l.media_path.is_none() && l.webcam_device.is_none()
         }) {
-            log::warn!("No effects or media loaded, cannot save preset");
-            return;
+            anyhow::bail!("no effects or media loaded, nothing to save");
         }
 
         let postprocess = self.current_postprocess();
@@ -3135,27 +3156,21 @@ impl App {
             enabled: self.volumetric_enabled,
             params: self.volumetric_params,
         });
-        match self.preset_store.save(
+        let idx = self.preset_store.save(
             name,
             layer_presets,
             self.layer_stack.active_layer,
             &postprocess,
             volumetric,
             chains.master,
-        ) {
-            Ok(idx) => {
-                log::info!("Saved preset '{}' at index {}", name, idx);
-                // Save preset-scoped bindings as sidecar
-                self.binding_bus.save_preset_bindings(name);
-                self.binding_bus.save_global();
-                // Sidecar is now on disk — no longer an unsaved change.
-                self.binding_bus.preset_scope_dirty = false;
-            }
-            Err(e) => {
-                log::error!("Failed to save preset: {e}");
-                self.status_error = Some((format!("Failed to save preset: {e}"), Instant::now()));
-            }
-        }
+        )?;
+        log::info!("Saved preset '{}' at index {}", name, idx);
+        // Save preset-scoped bindings as sidecar
+        self.binding_bus.save_preset_bindings(name);
+        self.binding_bus.save_global();
+        // Sidecar is now on disk — no longer an unsaved change.
+        self.binding_bus.preset_scope_dirty = false;
+        Ok(idx)
     }
 
     /// Switch to a preset the way a plain switch does (a click, Next/Prev
@@ -3972,12 +3987,28 @@ impl App {
                 layer.custom_name = lp.custom_name.clone();
                 if let Some(e) = layer.as_effect_mut() {
                     if let Some(svg) = &mut e.pass_executor.svg_offset {
-                        let settings = lp.svg_offset_settings.clone().unwrap_or_else(|| svg.settings.clone());
-                        if let Err(err) = svg.reload(&device, &self.gpu.queue, lp.svg_offset_path.as_deref(), settings, self.render_size.0, self.render_size.1) {
+                        let settings = lp
+                            .svg_offset_settings
+                            .clone()
+                            .unwrap_or_else(|| svg.settings.clone());
+                        if let Err(err) = svg.reload(
+                            &device,
+                            &self.gpu.queue,
+                            lp.svg_offset_path.as_deref(),
+                            settings,
+                            self.render_size.0,
+                            self.render_size.1,
+                        ) {
                             log::warn!("SVG preset source: {err}");
-                            self.status_error = Some((format!("SVG preset source: {err}"), Instant::now()));
+                            self.status_error =
+                                Some((format!("SVG preset source: {err}"), Instant::now()));
                         }
-                        e.pass_executor.rebuild_all_bind_groups(&device, &e.uniform_buffer, &self.placeholder, &self.audio_textures);
+                        e.pass_executor.rebuild_all_bind_groups(
+                            &device,
+                            &e.uniform_buffer,
+                            &self.placeholder,
+                            &self.audio_textures,
+                        );
                     }
                 }
                 // Restore live particle-sim / Lattice panel edits over the

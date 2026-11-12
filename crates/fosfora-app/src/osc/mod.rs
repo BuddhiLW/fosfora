@@ -1,5 +1,6 @@
 pub mod receiver;
 pub mod sender;
+mod setup;
 pub mod types;
 
 use std::sync::Arc;

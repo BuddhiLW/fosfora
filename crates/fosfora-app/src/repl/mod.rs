@@ -29,6 +29,7 @@ use crate::inbound::DropOldestSender;
 use crate::web::types::WsInMessage;
 
 mod media;
+mod ops;
 
 /// Namespace of the raw natives. User code goes through `fosfora`.
 const NATIVE_NS: &str = "fosfora.native";
@@ -40,6 +41,8 @@ const FOSFORA_SRC: &str = include_str!("fosfora.cljrs");
 pub(crate) struct Bridge {
     /// Commands into the render thread (drained by `WebSystem::update`).
     pub(crate) commands: DropOldestSender<WsInMessage>,
+    /// Control-op calls into the render thread (run by `App::run_control_ops`).
+    pub(crate) ops: crate::control::OpQueue,
     /// Latest full-state JSON, as the web remote receives it.
     pub(crate) state: Arc<Mutex<String>>,
     /// Latest audio-feature JSON, as the web remote receives it.
@@ -116,11 +119,16 @@ pub(crate) fn start(port: u16, bridge: Bridge) -> anyhow::Result<Repl> {
     })
 }
 
-/// Build the runtime, register the natives, preload `fosfora` into `user`,
-/// and bind the nREPL listener. Runs on the interpreter thread.
+/// Build the runtime, register the natives, preload `fosfora` and every
+/// control addon's namespace into `user`, run the user's init scripts, and
+/// bind the nREPL listener. Runs on the interpreter thread.
 fn boot(port: u16, bridge: Bridge) -> anyhow::Result<cljrs_nrepl::Poller> {
-    let runtime = cljrs_runtime::Runtime::builder()
-        .builtin_source("fosfora", FOSFORA_SRC)
+    let addon_ns = crate::control::ops::builtin_cljrs();
+    let mut builder = cljrs_runtime::Runtime::builder().builtin_source("fosfora", FOSFORA_SRC);
+    for ns in &addon_ns {
+        builder = builder.builtin_source(ns.ns, ns.src);
+    }
+    let runtime = builder
         .build()
         .map_err(|e| anyhow::anyhow!("cljrs runtime: {e:?}"))?;
     cljrs_stdlib::install(&runtime);
@@ -129,11 +137,15 @@ fn boot(port: u16, bridge: Bridge) -> anyhow::Result<cljrs_nrepl::Poller> {
 
     let mut env = Env::new(globals.clone(), "user");
     eval_str(&mut env, "(require '[fosfora :as f])")?;
+    if let Some(form) = ops::require_form(&addon_ns) {
+        eval_str(&mut env, &form)?;
+    }
+    ops::load_init_scripts(&mut env);
 
     let config = cljrs_nrepl::Config {
         addr: ([127, 0, 0, 1], port).into(),
         port_file: Some(PathBuf::from(".nrepl-port")),
-        limits: Default::default(),
+        ..cljrs_nrepl::Config::default()
     };
     let server =
         cljrs_nrepl::start(config, globals).map_err(|e| anyhow::anyhow!("nREPL: {e:?}"))?;
@@ -182,10 +194,12 @@ fn str_value(s: String) -> Value {
 fn register_natives(globals: &GlobalEnv, bridge: Bridge) {
     let Bridge {
         commands,
+        ops,
         state,
         audio,
     } = bridge;
     media::register(globals, commands.clone());
+    ops::register(globals, ops);
 
     // (send-edn "{:type \"set_param\" ...}") queues one web-remote message.
     def_native(globals, "send-edn", Arity::Fixed(1), move |args| {

@@ -2,10 +2,13 @@
 //!
 //! The embedded REPL (`repl` feature) issues the same [`WsInMessage`]s a
 //! WebSocket client does, through a queue that outlives server restarts, and
-//! reads the same state and audio snapshots the remote is sent.
+//! reads the same state and audio snapshots the remote is sent. Everything
+//! the remote cannot express goes through control ops instead
+//! ([`crate::control`]), queued here and run by `App::run_control_ops`.
 
 use super::WebSystem;
 use super::types::WsInMessage;
+use crate::control::{OpCall, OpQueue};
 
 impl WebSystem {
     /// Start the embedded nREPL on `port` (0 = any free port).
@@ -14,6 +17,7 @@ impl WebSystem {
         self.repl = None;
         let bridge = crate::repl::Bridge {
             commands: self.local_tx.clone(),
+            ops: self.control_queue(),
             state: self.latest_state.clone(),
             audio: self.latest_audio.clone(),
         };
@@ -29,6 +33,16 @@ impl WebSystem {
         return self.repl.as_ref().map(crate::repl::Repl::port);
         #[cfg(not(feature = "repl"))]
         None
+    }
+
+    /// A producer for control-op calls; each in-process client takes one.
+    pub fn control_queue(&self) -> OpQueue {
+        self.control_queue.clone()
+    }
+
+    /// The control-op calls queued since the last frame.
+    pub fn control_calls(&self) -> impl Iterator<Item = OpCall> + '_ {
+        self.control_rx.try_iter()
     }
 
     /// Whether an in-process reader wants the snapshots kept fresh even with
