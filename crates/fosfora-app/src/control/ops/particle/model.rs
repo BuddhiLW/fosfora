@@ -86,7 +86,10 @@ impl MediaKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SourceLoad {
     Builtin(String),
-    File { kind: MediaKind, path: Option<PathBuf> },
+    File {
+        kind: MediaKind,
+        path: Option<PathBuf>,
+    },
 }
 
 /// A partial edit of a video source's transport.

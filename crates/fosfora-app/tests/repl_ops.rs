@@ -410,7 +410,10 @@ fn appearance_web_port_and_tours_over_nrepl() {
     assert!(e.contains(":port"), "{e}");
     assert_eq!(repl.eval("(:port (sys/web))").unwrap(), port);
     assert_eq!(repl.eval("(count (sys/tours))").unwrap(), "4");
-    assert_eq!(repl.eval("(contains? (sys/tour) :running)").unwrap(), "true");
+    assert_eq!(
+        repl.eval("(contains? (sys/tour) :running)").unwrap(),
+        "true"
+    );
 }
 
 #[test]

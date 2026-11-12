@@ -25,27 +25,72 @@ impl<C: PresetPort + 'static> ControlAddon<C> for Addon {
 
     fn ops(&self) -> Vec<OpSpec<C>> {
         vec![
-            OpSpec::new("preset/list", "{}", "Every preset: index, name, builtin?, current?.", list::<C>),
-            OpSpec::new("preset/current", "{}", "The loaded preset {index name dirty}, or nil.", current::<C>),
-            OpSpec::new("preset/save", "{:name str}", "Save the live stack as a user preset.", save::<C>),
+            OpSpec::new(
+                "preset/list",
+                "{}",
+                "Every preset: index, name, builtin?, current?.",
+                list::<C>,
+            ),
+            OpSpec::new(
+                "preset/current",
+                "{}",
+                "The loaded preset {index name dirty}, or nil.",
+                current::<C>,
+            ),
+            OpSpec::new(
+                "preset/save",
+                "{:name str}",
+                "Save the live stack as a user preset.",
+                save::<C>,
+            ),
             OpSpec::new(
                 "preset/load",
                 "{:index int | :name str, :cut bool?}",
                 "Load a preset: default transition, or a cut with :cut true.",
                 load::<C>,
             ),
-            OpSpec::new("preset/next", "{:cut bool?}", "Load the next preset (wraps).", next::<C>),
-            OpSpec::new("preset/prev", "{:cut bool?}", "Load the previous preset (wraps).", prev::<C>),
-            OpSpec::new("preset/delete", "{:index int | :name str}", "Delete a user preset.", delete::<C>),
+            OpSpec::new(
+                "preset/next",
+                "{:cut bool?}",
+                "Load the next preset (wraps).",
+                next::<C>,
+            ),
+            OpSpec::new(
+                "preset/prev",
+                "{:cut bool?}",
+                "Load the previous preset (wraps).",
+                prev::<C>,
+            ),
+            OpSpec::new(
+                "preset/delete",
+                "{:index int | :name str}",
+                "Delete a user preset.",
+                delete::<C>,
+            ),
             OpSpec::new(
                 "preset/copy",
                 "{:index int | :name str, :as str?}",
                 "Copy a preset to a new user preset (default name \"<name> Copy\") and load it.",
                 copy::<C>,
             ),
-            OpSpec::new("preset/deselect", "{}", "Forget the current preset; the stack stays.", deselect::<C>),
-            OpSpec::new("preset/new", "{}", "Clear every layer and forget the current preset.", new::<C>),
-            OpSpec::new("preset/rescan", "{}", "Re-read the presets folder.", rescan::<C>),
+            OpSpec::new(
+                "preset/deselect",
+                "{}",
+                "Forget the current preset; the stack stays.",
+                deselect::<C>,
+            ),
+            OpSpec::new(
+                "preset/new",
+                "{}",
+                "Clear every layer and forget the current preset.",
+                new::<C>,
+            ),
+            OpSpec::new(
+                "preset/rescan",
+                "{}",
+                "Re-read the presets folder.",
+                rescan::<C>,
+            ),
             OpSpec::new(
                 "preset/transition",
                 "{:kind cut|dissolve|morph?, :secs num?, :keep-moving bool?}",
@@ -154,7 +199,11 @@ fn named(names: &[String], index: usize) -> Value {
 // ── Boundary ────────────────────────────────────────────────────────────────
 
 fn list<P: PresetPort>(port: &mut P, _: &Value) -> OpResult {
-    Ok(listing(&port.preset_names(), port.builtin_count(), port.current_preset()))
+    Ok(listing(
+        &port.preset_names(),
+        port.builtin_count(),
+        port.current_preset(),
+    ))
 }
 
 fn current<P: PresetPort>(port: &mut P, _: &Value) -> OpResult {

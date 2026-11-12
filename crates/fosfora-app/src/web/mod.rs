@@ -1,7 +1,7 @@
 pub mod client;
 mod local;
-mod setup;
 pub mod server;
+mod setup;
 #[allow(dead_code)]
 pub mod state;
 pub mod types;

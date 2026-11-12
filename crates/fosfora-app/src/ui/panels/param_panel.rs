@@ -252,9 +252,15 @@ pub fn draw_param_panel(
         let row_top = ui.cursor().top();
         match def {
             ParamDef::Int { name, min, max, .. } => {
-                let mut value = match store.get(name) { Some(ParamValue::Float(v)) => *v as i32, _ => *min };
+                let mut value = match store.get(name) {
+                    Some(ParamValue::Float(v)) => *v as i32,
+                    _ => *min,
+                };
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Slider::new(&mut value, *min..=*max).text(name)).changed() {
+                    if ui
+                        .add(egui::Slider::new(&mut value, *min..=*max).text(name))
+                        .changed()
+                    {
                         store.set(name, ParamValue::Float(value as f32));
                     }
                     osc_panel::draw_osc_badge(ui, osc, name);

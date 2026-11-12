@@ -75,7 +75,9 @@ impl Stub {
     }
 
     fn current_name(&self) -> Option<String> {
-        self.current.and_then(|i| self.scenes.get(i)).map(|(n, _)| n.clone())
+        self.current
+            .and_then(|i| self.scenes.get(i))
+            .map(|(n, _)| n.clone())
     }
 
     fn reselect(&mut self, name: Option<String>) {
@@ -91,7 +93,10 @@ impl OpHost for Stub {
 
 impl ScenePort for Stub {
     fn scene_list(&self) -> Vec<(String, usize)> {
-        self.scenes.iter().map(|(n, s)| (n.clone(), s.cues.len())).collect()
+        self.scenes
+            .iter()
+            .map(|(n, s)| (n.clone(), s.cues.len()))
+            .collect()
     }
     fn current_scene(&self) -> Option<usize> {
         self.current
@@ -115,7 +120,11 @@ impl ScenePort for Stub {
         Ok(i)
     }
     fn open_scene(&mut self, index: usize) -> Result<(), String> {
-        let (_, set) = self.scenes.get(index).cloned().ok_or("Invalid scene index")?;
+        let (_, set) = self
+            .scenes
+            .get(index)
+            .cloned()
+            .ok_or("Invalid scene index")?;
         self.current = Some(index);
         self.tl = Timeline::new(set.cues, set.loop_mode, set.advance_mode);
         Ok(())
@@ -139,7 +148,11 @@ impl ScenePort for Stub {
         if name.is_empty() {
             return Err("Scene name cannot be empty".into());
         }
-        let (old, mut set) = self.scenes.get(index).cloned().ok_or("Invalid scene index")?;
+        let (old, mut set) = self
+            .scenes
+            .get(index)
+            .cloned()
+            .ok_or("Invalid scene index")?;
         if old == name {
             return Ok(index);
         }
@@ -151,11 +164,19 @@ impl ScenePort for Stub {
         self.scenes.remove(index);
         set.name = name.to_owned();
         let i = self.put(set);
-        self.reselect(if was_current { Some(name.to_owned()) } else { keep });
+        self.reselect(if was_current {
+            Some(name.to_owned())
+        } else {
+            keep
+        });
         Ok(i)
     }
     fn duplicate_scene(&mut self, index: usize) -> Result<usize, String> {
-        let (name, mut set) = self.scenes.get(index).cloned().ok_or("Invalid scene index")?;
+        let (name, mut set) = self
+            .scenes
+            .get(index)
+            .cloned()
+            .ok_or("Invalid scene index")?;
         let keep = self.current_name();
         set.name = first_free_name(&self.names(), &format!("{name} copy"));
         let i = self.put(set);
@@ -174,7 +195,9 @@ impl CuePort for Stub {
             loop_mode: info.loop_mode,
             advance: info.advance_mode,
             transition: match info.state {
-                TimelineInfoState::Transitioning { from, to, progress, .. } => Some((from, to, progress)),
+                TimelineInfoState::Transitioning {
+                    from, to, progress, ..
+                } => Some((from, to, progress)),
                 _ => None,
             },
         }
@@ -276,7 +299,10 @@ fn every_op_is_registered_under_the_scene_namespace_and_every_signal_maps_to_one
 fn list_and_current_describe_the_library_and_the_timeline() {
     let mut s = Stub::with_scenes(&["Opener", "Close"], 2);
     let r = s.call("scene/list", json!({})).unwrap();
-    assert_eq!(r[0], json!({"index": 0, "name": "Close", "cues": 2, "current": false}));
+    assert_eq!(
+        r[0],
+        json!({"index": 0, "name": "Close", "cues": 2, "current": false})
+    );
     let r = s.call("scene/current", json!({})).unwrap();
     assert_eq!(r["scene"], Value::Null);
     assert_eq!(r["playing"], false);
@@ -285,7 +311,10 @@ fn list_and_current_describe_the_library_and_the_timeline() {
     let r = s.call("scene/current", json!({})).unwrap();
     assert_eq!(r["scene"]["name"], "Opener");
     assert_eq!(r["cues"].as_array().unwrap().len(), 2);
-    assert_eq!(r["advance"], json!({"mode": "manual", "beats-per-cue": null}));
+    assert_eq!(
+        r["advance"],
+        json!({"mode": "manual", "beats-per-cue": null})
+    );
 }
 
 #[test]
@@ -317,12 +346,26 @@ fn open_edits_without_playing_and_load_plays_from_the_first_cue() {
 #[test]
 fn delete_rename_and_duplicate_report_the_scene_they_touched() {
     let mut s = Stub::with_scenes(&["Opener", "Zed"], 1);
-    let r = s.call("scene/duplicate", json!({"name": "Opener"})).unwrap();
+    let r = s
+        .call("scene/duplicate", json!({"name": "Opener"}))
+        .unwrap();
     assert_eq!(r["name"], "Opener copy");
-    let r = s.call("scene/rename", json!({"name": "Opener copy", "to": "Encore"})).unwrap();
+    let r = s
+        .call(
+            "scene/rename",
+            json!({"name": "Opener copy", "to": "Encore"}),
+        )
+        .unwrap();
     assert_eq!(r["name"], "Encore");
-    assert!(s.call("scene/rename", json!({"name": "Encore", "to": "Zed"})).is_err(), "taken");
-    assert!(s.call("scene/rename", json!({"name": "Encore"})).is_err(), "no :to");
+    assert!(
+        s.call("scene/rename", json!({"name": "Encore", "to": "Zed"}))
+            .is_err(),
+        "taken"
+    );
+    assert!(
+        s.call("scene/rename", json!({"name": "Encore"})).is_err(),
+        "no :to"
+    );
     let r = s.call("scene/delete", json!({"name": "Encore"})).unwrap();
     assert_eq!(r["name"], "Encore");
     assert_eq!(s.names(), ["Opener", "Zed"]);
@@ -333,24 +376,43 @@ fn delete_rename_and_duplicate_report_the_scene_they_touched() {
 fn add_cue_uses_the_loaded_preset_or_a_named_one_and_inserts_at() {
     let mut s = Stub::with_scenes(&["Opener"], 0);
     s.call("scene/open", json!({"index": 0})).unwrap();
-    assert!(s.call("scene/add-cue", json!({})).is_err(), "nothing loaded");
+    assert!(
+        s.call("scene/add-cue", json!({})).is_err(),
+        "nothing loaded"
+    );
     s.loaded = Some(1);
     let r = s.call("scene/add-cue", json!({})).unwrap();
     assert_eq!(r["preset"], "Bloom");
-    let r = s.call("scene/add-cue", json!({"preset": "night", "at": 0})).unwrap();
-    assert_eq!((r["index"].as_u64(), r["preset"].as_str()), (Some(0), Some("Night Drive")));
+    let r = s
+        .call("scene/add-cue", json!({"preset": "night", "at": 0}))
+        .unwrap();
+    assert_eq!(
+        (r["index"].as_u64(), r["preset"].as_str()),
+        (Some(0), Some("Night Drive"))
+    );
     let r = s.call("scene/add-cue", json!({"preset": 0})).unwrap();
-    assert_eq!((r["index"].as_u64(), r["preset"].as_str()), (Some(2), Some("A")));
+    assert_eq!(
+        (r["index"].as_u64(), r["preset"].as_str()),
+        (Some(2), Some("A"))
+    );
     assert!(s.call("scene/add-cue", json!({"preset": "zzz"})).is_err());
     assert!(s.call("scene/add-cue", json!({"preset": 9})).is_err());
-    assert!(s.call("scene/add-cue", json!({"preset": "A", "at": -1})).is_err());
-    assert_eq!(s.scenes[0].1.cues.len(), 3, "edits autosave into the open scene");
+    assert!(
+        s.call("scene/add-cue", json!({"preset": "A", "at": -1}))
+            .is_err()
+    );
+    assert_eq!(
+        s.scenes[0].1.cues.len(),
+        3,
+        "edits autosave into the open scene"
+    );
 }
 
 #[test]
 fn a_cue_added_in_timer_mode_gets_a_hold() {
     let mut s = Stub::with_scenes(&["Opener"], 0);
-    s.call("scene/timeline", json!({"advance": "timer"})).unwrap();
+    s.call("scene/timeline", json!({"advance": "timer"}))
+        .unwrap();
     let r = s.call("scene/add-cue", json!({"preset": "A"})).unwrap();
     assert_eq!(r["hold"], json!(DEFAULT_HOLD_SECS));
 }
@@ -361,12 +423,17 @@ fn remove_and_move_refuse_out_of_range_cues() {
     for p in ["A", "Bloom", "Night Drive"] {
         s.call("scene/add-cue", json!({"preset": p})).unwrap();
     }
-    let r = s.call("scene/move-cue", json!({"from": 2, "to": 0})).unwrap();
+    let r = s
+        .call("scene/move-cue", json!({"from": 2, "to": 0}))
+        .unwrap();
     assert_eq!(r["preset"], "Night Drive");
     let r = s.call("scene/remove-cue", json!({"cue": 1})).unwrap();
     assert_eq!(r["preset"], "A");
     assert!(s.call("scene/remove-cue", json!({"cue": 2})).is_err());
-    assert!(s.call("scene/move-cue", json!({"from": 0, "to": 5})).is_err());
+    assert!(
+        s.call("scene/move-cue", json!({"from": 0, "to": 5}))
+            .is_err()
+    );
     assert!(s.call("scene/remove-cue", json!({})).is_err());
     assert_eq!(s.tl.cues.len(), 2);
 }
@@ -380,17 +447,41 @@ fn set_cue_reads_without_changes_and_refuses_out_of_range_values() {
     assert_eq!(before["transition"], "cut");
     assert_eq!(s.autosaves, saves, "a read does not save");
     let r = s
-        .call("scene/set-cue", json!({"cue": 0, "transition": "dissolve", "secs": 2.5, "hold": 8, "label": " Drop "}))
+        .call(
+            "scene/set-cue",
+            json!({"cue": 0, "transition": "dissolve", "secs": 2.5, "hold": 8, "label": " Drop "}),
+        )
         .unwrap();
-    assert_eq!(r, json!({"index": 0, "preset": "A", "label": "Drop", "transition": "dissolve", "secs": 2.5, "hold": 8.0}));
-    let r = s.call("scene/set-cue", json!({"cue": 0, "hold": false, "label": ""})).unwrap();
-    assert_eq!((r["hold"].clone(), r["label"].clone()), (Value::Null, Value::Null));
-    for bad in [json!({"secs": 0}), json!({"secs": 31}), json!({"hold": 0.1}), json!({"transition": "wipe"}), json!({"label": 3})] {
+    assert_eq!(
+        r,
+        json!({"index": 0, "preset": "A", "label": "Drop", "transition": "dissolve", "secs": 2.5, "hold": 8.0})
+    );
+    let r = s
+        .call(
+            "scene/set-cue",
+            json!({"cue": 0, "hold": false, "label": ""}),
+        )
+        .unwrap();
+    assert_eq!(
+        (r["hold"].clone(), r["label"].clone()),
+        (Value::Null, Value::Null)
+    );
+    for bad in [
+        json!({"secs": 0}),
+        json!({"secs": 31}),
+        json!({"hold": 0.1}),
+        json!({"transition": "wipe"}),
+        json!({"label": 3}),
+    ] {
         let mut a = bad.clone();
         a["cue"] = json!(0);
         assert!(s.call("scene/set-cue", a).is_err(), "{bad}");
     }
-    assert_eq!(s.tl.cues[0].transition, crate::scene::types::TransitionType::Dissolve, "refusals change nothing");
+    assert_eq!(
+        s.tl.cues[0].transition,
+        crate::scene::types::TransitionType::Dissolve,
+        "refusals change nothing"
+    );
     assert!(s.call("scene/set-cue", json!({"cue": 4})).is_err());
 }
 
@@ -404,13 +495,19 @@ fn transport_plays_steps_jumps_and_stops() {
     }
     assert!(s.call("scene/next", json!({})).is_err(), "stopped");
     let r = s.call("scene/toggle", json!({})).unwrap();
-    assert_eq!((r["playing"].clone(), r["cue"].clone()), (json!(true), json!(0)));
+    assert_eq!(
+        (r["playing"].clone(), r["cue"].clone()),
+        (json!(true), json!(0))
+    );
     assert_eq!(s.call("scene/next", json!({})).unwrap()["cue"], 1);
     assert_eq!(s.call("scene/prev", json!({})).unwrap()["cue"], 0);
     assert_eq!(s.call("scene/jump", json!({"cue": 2})).unwrap()["cue"], 2);
     assert!(s.call("scene/jump", json!({"cue": 3})).is_err());
     let r = s.call("scene/stop", json!({})).unwrap();
-    assert_eq!((r["playing"].clone(), r["cue"].clone()), (json!(false), Value::Null));
+    assert_eq!(
+        (r["playing"].clone(), r["cue"].clone()),
+        (json!(false), Value::Null)
+    );
     assert_eq!(s.call("scene/play", json!({"cue": 1})).unwrap()["cue"], 1);
     assert!(s.call("scene/play", json!({"cue": 7})).is_err());
     assert_eq!(s.call("scene/toggle", json!({})).unwrap()["playing"], false);
@@ -421,26 +518,57 @@ fn timeline_reads_and_changes_loop_and_advance() {
     let mut s = Stub::with_scenes(&["Opener"], 0);
     s.call("scene/add-cue", json!({"preset": "A"})).unwrap();
     let r = s.call("scene/timeline", json!({})).unwrap();
-    assert_eq!(r, json!({"loop": false, "advance": {"mode": "manual", "beats-per-cue": null}}));
-    assert!(s.call("scene/timeline", json!({"beats": 8})).is_err(), "not beat-synced");
-    let r = s.call("scene/timeline", json!({"loop": true, "advance": "timer"})).unwrap();
+    assert_eq!(
+        r,
+        json!({"loop": false, "advance": {"mode": "manual", "beats-per-cue": null}})
+    );
+    assert!(
+        s.call("scene/timeline", json!({"beats": 8})).is_err(),
+        "not beat-synced"
+    );
+    let r = s
+        .call("scene/timeline", json!({"loop": true, "advance": "timer"}))
+        .unwrap();
     assert_eq!(r["loop"], true);
-    assert_eq!(s.tl.cues[0].hold_secs, Some(DEFAULT_HOLD_SECS), "Timer fills holds");
-    let r = s.call("scene/timeline", json!({"advance": "beat-sync"})).unwrap();
-    assert_eq!(r["advance"], json!({"mode": "beats", "beats-per-cue": DEFAULT_BEATS}));
+    assert_eq!(
+        s.tl.cues[0].hold_secs,
+        Some(DEFAULT_HOLD_SECS),
+        "Timer fills holds"
+    );
+    let r = s
+        .call("scene/timeline", json!({"advance": "beat-sync"}))
+        .unwrap();
+    assert_eq!(
+        r["advance"],
+        json!({"mode": "beats", "beats-per-cue": DEFAULT_BEATS})
+    );
     let r = s.call("scene/timeline", json!({"beats": 16})).unwrap();
     assert_eq!(r["advance"]["beats-per-cue"], 16);
-    for bad in [json!({"beats": 0}), json!({"beats": 65}), json!({"advance": "wild"}), json!({"loop": "yes"}), json!({"advance": 2})] {
+    for bad in [
+        json!({"beats": 0}),
+        json!({"beats": 65}),
+        json!({"advance": "wild"}),
+        json!({"loop": "yes"}),
+        json!({"advance": 2}),
+    ] {
         assert!(s.call("scene/timeline", bad.clone()).is_err(), "{bad}");
     }
-    assert_eq!(s.tl.advance_mode, AdvanceMode::BeatSync { beats_per_cue: 16 });
+    assert_eq!(
+        s.tl.advance_mode,
+        AdvanceMode::BeatSync { beats_per_cue: 16 }
+    );
 }
 
 #[test]
 fn the_cue_strip_mode_ids_map_like_the_selector() {
     assert_eq!(advance_from_ui_id(0), AdvanceMode::Manual);
     assert_eq!(advance_from_ui_id(1), AdvanceMode::Timer);
-    assert_eq!(advance_from_ui_id(2), AdvanceMode::BeatSync { beats_per_cue: DEFAULT_BEATS });
+    assert_eq!(
+        advance_from_ui_id(2),
+        AdvanceMode::BeatSync {
+            beats_per_cue: DEFAULT_BEATS
+        }
+    );
     assert_eq!(advance_from_ui_id(99), AdvanceMode::Manual);
 }
 
@@ -450,7 +578,9 @@ fn any_mode(rng: &mut crate::control::testkit::Rng) -> AdvanceMode {
     match rng.below(3) {
         0 => AdvanceMode::Manual,
         1 => AdvanceMode::Timer,
-        _ => AdvanceMode::BeatSync { beats_per_cue: 1 + u32::try_from(rng.below(64)).unwrap() },
+        _ => AdvanceMode::BeatSync {
+            beats_per_cue: 1 + u32::try_from(rng.below(64)).unwrap(),
+        },
     }
 }
 
@@ -514,7 +644,10 @@ fn cue_edits_are_idempotent_and_touch_only_what_they_name() {
             assert_eq!(cue.hold_secs, before.hold_secs);
         }
         if let Some(l) = &edit.label {
-            assert_eq!(cue.label.as_deref(), Some(l.trim()).filter(|t| !t.is_empty()));
+            assert_eq!(
+                cue.label.as_deref(),
+                Some(l.trim()).filter(|t| !t.is_empty())
+            );
         }
     });
 }
@@ -543,10 +676,25 @@ fn fill_timer_holds_keeps_existing_holds_and_is_idempotent() {
 #[test]
 fn random_op_sequences_keep_library_and_timeline_consistent() {
     let ops = [
-        "scene/list", "scene/current", "scene/save", "scene/open", "scene/load", "scene/delete",
-        "scene/rename", "scene/duplicate", "scene/add-cue", "scene/remove-cue", "scene/move-cue",
-        "scene/set-cue", "scene/play", "scene/stop", "scene/toggle", "scene/next", "scene/prev",
-        "scene/jump", "scene/timeline",
+        "scene/list",
+        "scene/current",
+        "scene/save",
+        "scene/open",
+        "scene/load",
+        "scene/delete",
+        "scene/rename",
+        "scene/duplicate",
+        "scene/add-cue",
+        "scene/remove-cue",
+        "scene/move-cue",
+        "scene/set-cue",
+        "scene/play",
+        "scene/stop",
+        "scene/toggle",
+        "scene/next",
+        "scene/prev",
+        "scene/jump",
+        "scene/timeline",
     ];
     cases(150, 0x5CE_0004, |rng, _| {
         let mut s = Stub::with_scenes(&["Opener", "Close"], 2);
@@ -555,10 +703,16 @@ fn random_op_sequences_keep_library_and_timeline_consistent() {
             let op = *rng.pick(&ops).unwrap();
             let n = s.tl.cues.len() + s.scenes.len() + 2;
             let args = match rng.below(4) {
-                0 => json!({"index": rng.below(n), "cue": rng.below(n), "from": rng.below(n), "to": rng.name()}),
-                1 => json!({"name": rng.name(), "to": rng.name(), "preset": rng.name(), "cue": rng.below(n)}),
-                2 => json!({"cue": rng.below(n), "from": rng.below(n), "to": rng.below(n), "loop": rng.coin(),
-                            "advance": *rng.pick(&["manual", "timer", "beats"]).unwrap(), "hold": false}),
+                0 => {
+                    json!({"index": rng.below(n), "cue": rng.below(n), "from": rng.below(n), "to": rng.name()})
+                }
+                1 => {
+                    json!({"name": rng.name(), "to": rng.name(), "preset": rng.name(), "cue": rng.below(n)})
+                }
+                2 => {
+                    json!({"cue": rng.below(n), "from": rng.below(n), "to": rng.below(n), "loop": rng.coin(),
+                            "advance": *rng.pick(&["manual", "timer", "beats"]).unwrap(), "hold": false})
+                }
                 _ => json!({}),
             };
             let scenes_before = s.scenes.len();
@@ -572,12 +726,20 @@ fn random_op_sequences_keep_library_and_timeline_consistent() {
             }
             // Only save/duplicate/rename grow the library, only delete shrinks it.
             match (op, &result) {
-                ("scene/save" | "scene/duplicate", Ok(_)) => assert!(s.scenes.len() <= scenes_before + 1),
+                ("scene/save" | "scene/duplicate", Ok(_)) => {
+                    assert!(s.scenes.len() <= scenes_before + 1);
+                }
                 ("scene/delete", Ok(_)) => assert_eq!(s.scenes.len(), scenes_before - 1),
                 _ => assert_eq!(s.scenes.len(), scenes_before, "{op} changed the library"),
             }
             // Library results name a scene that exists.
-            if let (Ok(v), true) = (&result, matches!(op, "scene/save" | "scene/open" | "scene/rename" | "scene/duplicate")) {
+            if let (Ok(v), true) = (
+                &result,
+                matches!(
+                    op,
+                    "scene/save" | "scene/open" | "scene/rename" | "scene/duplicate"
+                ),
+            ) {
                 let i = v["index"].as_u64().unwrap() as usize;
                 assert_eq!(s.scenes[i].0, v["name"].as_str().unwrap(), "{op}");
             }

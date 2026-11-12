@@ -334,7 +334,12 @@ impl ParamPort for App {
     }
 
     fn param_value(&self, layer: usize, name: &str) -> Option<ParamValue> {
-        self.layer_stack.layers.get(layer)?.param_store.get(name).cloned()
+        self.layer_stack
+            .layers
+            .get(layer)?
+            .param_store
+            .get(name)
+            .cloned()
     }
 
     fn set_param(&mut self, layer: usize, name: &str, value: ParamValue) {

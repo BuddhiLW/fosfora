@@ -28,7 +28,12 @@ impl<C: ScenePort + CuePort + 'static> ControlAddon<C> for Addon {
 
     fn ops(&self) -> Vec<OpSpec<C>> {
         vec![
-            OpSpec::new("scene/list", "{}", "Every scene: index, name, cues, current?.", list::<C>),
+            OpSpec::new(
+                "scene/list",
+                "{}",
+                "Every scene: index, name, cues, current?.",
+                list::<C>,
+            ),
             OpSpec::new(
                 "scene/current",
                 "{}",
@@ -41,31 +46,91 @@ impl<C: ScenePort + CuePort + 'static> ControlAddon<C> for Addon {
                 "Save the timeline as a scene; a new name starts a blank cue list.",
                 save::<C>,
             ),
-            OpSpec::new("scene/open", "{:index int | :name str}", "Open a scene for editing without playing it.", open::<C>),
-            OpSpec::new("scene/load", "{:index int | :name str}", "Open a scene and play it from its first cue.", load::<C>),
-            OpSpec::new("scene/delete", "{:index int | :name str}", "Delete a scene file.", delete::<C>),
-            OpSpec::new("scene/rename", "{:index int | :name str, :to str}", "Rename a scene.", rename::<C>),
-            OpSpec::new("scene/duplicate", "{:index int | :name str}", "Copy a scene as \"<name> copy\".", duplicate::<C>),
+            OpSpec::new(
+                "scene/open",
+                "{:index int | :name str}",
+                "Open a scene for editing without playing it.",
+                open::<C>,
+            ),
+            OpSpec::new(
+                "scene/load",
+                "{:index int | :name str}",
+                "Open a scene and play it from its first cue.",
+                load::<C>,
+            ),
+            OpSpec::new(
+                "scene/delete",
+                "{:index int | :name str}",
+                "Delete a scene file.",
+                delete::<C>,
+            ),
+            OpSpec::new(
+                "scene/rename",
+                "{:index int | :name str, :to str}",
+                "Rename a scene.",
+                rename::<C>,
+            ),
+            OpSpec::new(
+                "scene/duplicate",
+                "{:index int | :name str}",
+                "Copy a scene as \"<name> copy\".",
+                duplicate::<C>,
+            ),
             OpSpec::new(
                 "scene/add-cue",
                 "{:preset int|str?, :at int?}",
                 "Add a cue for a preset (default: the loaded one), at :at or at the end.",
                 add_cue::<C>,
             ),
-            OpSpec::new("scene/remove-cue", "{:cue int}", "Remove a cue.", remove_cue::<C>),
-            OpSpec::new("scene/move-cue", "{:from int, :to int}", "Move a cue; playback follows it.", move_cue::<C>),
+            OpSpec::new(
+                "scene/remove-cue",
+                "{:cue int}",
+                "Remove a cue.",
+                remove_cue::<C>,
+            ),
+            OpSpec::new(
+                "scene/move-cue",
+                "{:from int, :to int}",
+                "Move a cue; playback follows it.",
+                move_cue::<C>,
+            ),
             OpSpec::new(
                 "scene/set-cue",
                 "{:cue int, :transition cut|dissolve|morph?, :secs 0.1..30?, :hold 0.5..600|false?, :label str?}",
                 "Read a cue, or change its transition, duration, hold (false clears) or label.",
                 set_cue::<C>,
             ),
-            OpSpec::new("scene/play", "{:cue int?}", "Play the timeline from a cue (default the first).", play::<C>),
+            OpSpec::new(
+                "scene/play",
+                "{:cue int?}",
+                "Play the timeline from a cue (default the first).",
+                play::<C>,
+            ),
             OpSpec::new("scene/stop", "{}", "Stop the timeline.", stop::<C>),
-            OpSpec::new("scene/toggle", "{}", "Stop if playing, else play from the first cue.", toggle::<C>),
-            OpSpec::new("scene/next", "{}", "Go to the next cue (wraps when looping).", next::<C>),
-            OpSpec::new("scene/prev", "{}", "Go to the previous cue (wraps when looping).", prev::<C>),
-            OpSpec::new("scene/jump", "{:cue int}", "Go to a cue, starting playback if stopped.", jump::<C>),
+            OpSpec::new(
+                "scene/toggle",
+                "{}",
+                "Stop if playing, else play from the first cue.",
+                toggle::<C>,
+            ),
+            OpSpec::new(
+                "scene/next",
+                "{}",
+                "Go to the next cue (wraps when looping).",
+                next::<C>,
+            ),
+            OpSpec::new(
+                "scene/prev",
+                "{}",
+                "Go to the previous cue (wraps when looping).",
+                prev::<C>,
+            ),
+            OpSpec::new(
+                "scene/jump",
+                "{:cue int}",
+                "Go to a cue, starting playback if stopped.",
+                jump::<C>,
+            ),
             OpSpec::new(
                 "scene/timeline",
                 "{:loop bool?, :advance manual|timer|beats?, :beats 1..64?}",
@@ -307,8 +372,12 @@ fn timeline<P: CuePort>(port: &mut P, a: &Value) -> OpResult {
         None | Some(Value::Null) => None,
         Some(_) => Some(args::bool(a, "loop")?),
     };
-    let kind = args::opt_str(a, "advance").map(AdvanceKind::parse).transpose()?;
-    if a.get("advance").is_some_and(|v| !v.is_null() && !v.is_string()) {
+    let kind = args::opt_str(a, "advance")
+        .map(AdvanceKind::parse)
+        .transpose()?;
+    if a.get("advance")
+        .is_some_and(|v| !v.is_null() && !v.is_string())
+    {
         return Err(":advance must be manual, timer or beats".into());
     }
     let beats = match a.get("beats") {

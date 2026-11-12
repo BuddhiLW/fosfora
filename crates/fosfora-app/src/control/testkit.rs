@@ -53,7 +53,8 @@ impl Rng {
 pub fn cases(n: usize, seed: u64, mut body: impl FnMut(&mut Rng, usize)) {
     let mut rng = Rng::new(seed);
     for case in 0..n {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(&mut rng, case)));
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(&mut rng, case)));
         if let Err(e) = result {
             eprintln!("property failed: seed {seed}, case {case}");
             std::panic::resume_unwind(e);

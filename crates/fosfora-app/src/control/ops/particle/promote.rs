@@ -26,14 +26,22 @@ pub fn layer<P: ParticleLayers>(port: &P, a: &Value) -> Result<usize, String> {
             if n < port.layer_count() {
                 Ok(n)
             } else {
-                Err(format!("layer {n} out of range (have {})", port.layer_count()))
+                Err(format!(
+                    "layer {n} out of range (have {})",
+                    port.layer_count()
+                ))
             }
         }
     }
 }
 
 /// A number arg, if present; `check` is its valid range, `what` names it.
-fn num(a: &Value, key: &str, check: impl Fn(f64) -> bool, what: &str) -> Result<Option<f32>, String> {
+fn num(
+    a: &Value,
+    key: &str,
+    check: impl Fn(f64) -> bool,
+    what: &str,
+) -> Result<Option<f32>, String> {
     match a.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => match v.as_f64() {
@@ -61,7 +69,10 @@ fn whole(a: &Value, key: &str, max: u32) -> Result<Option<u32>, String> {
 fn flag(a: &Value, key: &str) -> Result<Option<bool>, String> {
     match a.get(key) {
         None | Some(Value::Null) => Ok(None),
-        Some(v) => v.as_bool().map(Some).ok_or_else(|| format!(":{key} must be true or false")),
+        Some(v) => v
+            .as_bool()
+            .map(Some)
+            .ok_or_else(|| format!(":{key} must be true or false")),
     }
 }
 
@@ -117,8 +128,13 @@ pub fn pose(base: &ModelSampleDef, a: &Value) -> Result<ModelSampleDef, String> 
         pitch_degrees: get("pitch", base.pitch_degrees)?,
         scale: num(a, "scale", |x| x > 0.0, "a number > 0")?.unwrap_or(base.scale),
         ambient: get("ambient", base.ambient)?,
-        light_mix: num(a, "light-mix", |x| (0.0..=1.0).contains(&x), "a number 0..1")?
-            .unwrap_or(base.light_mix),
+        light_mix: num(
+            a,
+            "light-mix",
+            |x| (0.0..=1.0).contains(&x),
+            "a number 0..1",
+        )?
+        .unwrap_or(base.light_mix),
         light_x: get("light-x", base.light_x)?,
         light_y: get("light-y", base.light_y)?,
         light_z: get("light-z", base.light_z)?,
@@ -189,7 +205,10 @@ pub fn obstacle_op(a: &Value) -> Result<ObstacleOp, String> {
             .filter(|x| x.is_finite())
             .ok_or_else(|| format!("{what} takes a number :value, got {v}"))
     };
-    let b = |what: &str| v.as_bool().ok_or_else(|| format!("{what} takes a boolean :value, got {v}"));
+    let b = |what: &str| {
+        v.as_bool()
+            .ok_or_else(|| format!("{what} takes a boolean :value, got {v}"))
+    };
     Ok(ObstacleOp::Command(match cmd {
         "enabled" | "enable" => C::SetEnabled(b(cmd)?),
         "mode" => C::SetMode(named(MODES, v, "mode")?),
@@ -221,16 +240,42 @@ pub fn obstacle_op(a: &Value) -> Result<ObstacleOp, String> {
         "load-image" => return Ok(ObstacleOp::Load(MediaKind::Image, path(a)?)),
         "load-video" => return Ok(ObstacleOp::Load(MediaKind::Video, path(a)?)),
         "load-model" => return Ok(ObstacleOp::Load(MediaKind::Model, path(a)?)),
-        _ => return Err(format!("unknown obstacle :cmd {raw:?}; one of {:?}", OBSTACLE_CMDS)),
+        _ => {
+            return Err(format!(
+                "unknown obstacle :cmd {raw:?}; one of {:?}",
+                OBSTACLE_CMDS
+            ));
+        }
     }))
 }
 
 /// Every name [`obstacle_op`] takes (without the optional `set-` prefix).
 pub const OBSTACLE_CMDS: &[&str] = &[
-    "enabled", "mode", "fit", "threshold", "elasticity", "use-webcam", "use-depth",
-    "download-depth-model", "clear", "water", "water-level", "water-source", "water-drain",
-    "water-flux", "model-spin", "model-display", "fluid", "fluid-speed", "fluid-coupling",
-    "fluid-vorticity", "fluid-viscosity", "fluid-grid", "load-image", "load-video", "load-model",
+    "enabled",
+    "mode",
+    "fit",
+    "threshold",
+    "elasticity",
+    "use-webcam",
+    "use-depth",
+    "download-depth-model",
+    "clear",
+    "water",
+    "water-level",
+    "water-source",
+    "water-drain",
+    "water-flux",
+    "model-spin",
+    "model-display",
+    "fluid",
+    "fluid-speed",
+    "fluid-coupling",
+    "fluid-vorticity",
+    "fluid-viscosity",
+    "fluid-grid",
+    "load-image",
+    "load-video",
+    "load-model",
 ];
 
 /// A morph style by name or panel index.
@@ -263,7 +308,12 @@ pub fn geometry(a: &Value) -> Result<String, String> {
 }
 
 /// A number arg that must be present.
-pub fn required(a: &Value, key: &str, check: impl Fn(f64) -> bool, what: &str) -> Result<f32, String> {
+pub fn required(
+    a: &Value,
+    key: &str,
+    check: impl Fn(f64) -> bool,
+    what: &str,
+) -> Result<f32, String> {
     num(a, key, check, what)?.ok_or_else(|| format!("missing :{key} ({what})"))
 }
 

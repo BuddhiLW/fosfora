@@ -260,7 +260,9 @@ pub(crate) fn modulate_param(store: &mut crate::params::ParamStore, param_name: 
         crate::params::ParamDef::Float { min, max, .. } => {
             ParamValue::Float(min + (max - min) * value.clamp(0.0, 1.0))
         }
-        crate::params::ParamDef::Int { min, max, .. } => ParamValue::Float((min as f32 + (max-min) as f32 * value.clamp(0.0,1.0)).round()),
+        crate::params::ParamDef::Int { min, max, .. } => {
+            ParamValue::Float((min as f32 + (max - min) as f32 * value.clamp(0.0, 1.0)).round())
+        }
         crate::params::ParamDef::Bool { .. } => ParamValue::Bool(value > 0.5),
         _ => return,
     };

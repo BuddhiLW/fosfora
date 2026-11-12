@@ -119,7 +119,12 @@ impl PresetPort for Stub {
     fn preset_transition(&self) -> (TransitionType, f32, bool) {
         self.transition
     }
-    fn set_preset_transition(&mut self, kind: Option<TransitionType>, secs: Option<f32>, keep: Option<bool>) {
+    fn set_preset_transition(
+        &mut self,
+        kind: Option<TransitionType>,
+        secs: Option<f32>,
+        keep: Option<bool>,
+    ) {
         let t = &mut self.transition;
         t.0 = kind.unwrap_or(t.0);
         t.1 = secs.map_or(t.1, |s| s.clamp(0.1, 30.0));
@@ -132,11 +137,26 @@ fn transition_reads_without_args_and_changes_only_what_is_given() {
     let mut s = Stub::new(&[], 0);
     let r = s.call("preset/transition", json!({})).unwrap();
     assert_eq!(r, json!({"kind": "cut", "secs": 1.0, "keep-moving": false}));
-    let r = s.call("preset/transition", json!({"kind": "dissolve", "secs": 2.5})).unwrap();
-    assert_eq!(r, json!({"kind": "dissolve", "secs": 2.5, "keep-moving": false}));
-    assert!(s.call("preset/transition", json!({"kind": "wipe"})).is_err());
+    let r = s
+        .call(
+            "preset/transition",
+            json!({"kind": "dissolve", "secs": 2.5}),
+        )
+        .unwrap();
+    assert_eq!(
+        r,
+        json!({"kind": "dissolve", "secs": 2.5, "keep-moving": false})
+    );
+    assert!(
+        s.call("preset/transition", json!({"kind": "wipe"}))
+            .is_err()
+    );
     assert!(s.call("preset/transition", json!({"secs": -1})).is_err());
-    assert_eq!(s.transition.0, TransitionType::Dissolve, "a refused call changes nothing");
+    assert_eq!(
+        s.transition.0,
+        TransitionType::Dissolve,
+        "a refused call changes nothing"
+    );
 }
 
 // ── Unit ────────────────────────────────────────────────────────────────────
@@ -152,7 +172,13 @@ fn every_op_is_registered_under_the_preset_namespace() {
         .map(|o| o["name"].as_str().unwrap())
         .collect();
     assert!(names.iter().all(|n| n.starts_with("preset/")), "{names:?}");
-    for op in ["preset/save", "preset/load", "preset/delete", "preset/copy", "preset/next"] {
+    for op in [
+        "preset/save",
+        "preset/load",
+        "preset/delete",
+        "preset/copy",
+        "preset/next",
+    ] {
         assert!(names.contains(&op), "{op} missing from {names:?}");
     }
 }
@@ -162,7 +188,8 @@ fn load_by_name_switches_and_cut_loads_without_transition() {
     let mut s = Stub::new(&["Aurora", "Night Drive", "Tunnel"], 1);
     let r = s.call("preset/load", json!({"name": "night"})).unwrap();
     assert_eq!(r, json!({"index": 1, "name": "Night Drive"}));
-    s.call("preset/load", json!({"index": 2, "cut": true})).unwrap();
+    s.call("preset/load", json!({"index": 2, "cut": true}))
+        .unwrap();
     assert_eq!(s.did, vec![Did::Switch(1), Did::Cut(2)]);
 }
 
@@ -199,8 +226,13 @@ fn copy_names_like_the_copy_button_and_loads_the_copy() {
     let mut s = Stub::new(&["Aurora", "Aurora Copy"], 1);
     let r = s.call("preset/copy", json!({"index": 0})).unwrap();
     assert_eq!(r["name"], "Aurora Copy 2");
-    assert_eq!(s.did.last(), Some(&Did::Cut(r["index"].as_u64().unwrap() as usize)));
-    let r = s.call("preset/copy", json!({"index": 0, "as": "Dawn"})).unwrap();
+    assert_eq!(
+        s.did.last(),
+        Some(&Did::Cut(r["index"].as_u64().unwrap() as usize))
+    );
+    let r = s
+        .call("preset/copy", json!({"index": 0, "as": "Dawn"}))
+        .unwrap();
     assert_eq!(r["name"], "Dawn");
 }
 
@@ -219,7 +251,10 @@ fn next_and_prev_wrap_and_start_from_the_ends_when_nothing_is_loaded() {
 fn new_clears_and_current_reports_nil_after() {
     let mut s = Stub::new(&["Aurora"], 1);
     s.call("preset/load", json!({"index": 0})).unwrap();
-    assert_eq!(s.call("preset/current", json!({})).unwrap()["name"], "Aurora");
+    assert_eq!(
+        s.call("preset/current", json!({})).unwrap()["name"],
+        "Aurora"
+    );
     s.call("preset/new", json!({})).unwrap();
     assert_eq!(s.call("preset/current", json!({})).unwrap(), Value::Null);
     assert_eq!(s.did.last(), Some(&Did::Cleared));
@@ -264,8 +299,18 @@ fn copy_name_is_always_fresh_and_derived_from_the_base() {
 
 #[test]
 fn random_op_sequences_keep_the_store_consistent() {
-    let ops = ["preset/list", "preset/load", "preset/next", "preset/prev", "preset/save",
-               "preset/delete", "preset/copy", "preset/current", "preset/new", "preset/deselect"];
+    let ops = [
+        "preset/list",
+        "preset/load",
+        "preset/next",
+        "preset/prev",
+        "preset/save",
+        "preset/delete",
+        "preset/copy",
+        "preset/current",
+        "preset/new",
+        "preset/deselect",
+    ];
     cases(200, 0x5EED_0003, |rng, _| {
         let mut s = Stub::new(&["Aurora", "Night"], 2);
         for _ in 0..30 {

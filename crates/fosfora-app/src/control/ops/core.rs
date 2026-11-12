@@ -16,7 +16,12 @@ impl<C: OpHost + 'static> ControlAddon<C> for Addon {
 
     fn ops(&self) -> Vec<OpSpec<C>> {
         vec![
-            OpSpec::new("ops", "{}", "Every registered op: name, addon, args, doc.", ops::<C>),
+            OpSpec::new(
+                "ops",
+                "{}",
+                "Every registered op: name, addon, args, doc.",
+                ops::<C>,
+            ),
             OpSpec::new("addons", "{}", "Ids of the registered addons.", addons::<C>),
         ]
     }

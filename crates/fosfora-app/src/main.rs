@@ -1115,10 +1115,11 @@ impl ApplicationHandler for FosforaApp {
                         &mut app.binding_matrix,
                         &mut app.binding_bus,
                         || {
-                            let layers = fosfora_app::control::ops::bindings::actions::layer_param_infos(
-                                &app.layer_stack,
-                                &app.effect_loader,
-                            );
+                            let layers =
+                                fosfora_app::control::ops::bindings::actions::layer_param_infos(
+                                    &app.layer_stack,
+                                    &app.effect_loader,
+                                );
                             crate::ui::panels::binding_helpers::BindingPanelInfo {
                                 layers,
                                 active_layer,
@@ -3102,7 +3103,10 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_rename")));
                 if let Some((idx, name)) = layer_rename {
-                    let edit = LayerEdit { name: Some(name), ..LayerEdit::default() };
+                    let edit = LayerEdit {
+                        name: Some(name),
+                        ..LayerEdit::default()
+                    };
                     let _ = app.layer_edit(idx, &edit);
                 }
 
@@ -3139,7 +3143,10 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_lock")));
                 if let Some((idx, locked)) = toggle_lock {
-                    let edit = LayerEdit { locked: Some(locked), ..LayerEdit::default() };
+                    let edit = LayerEdit {
+                        locked: Some(locked),
+                        ..LayerEdit::default()
+                    };
                     let _ = app.layer_edit(idx, &edit);
                 }
 
@@ -3148,7 +3155,10 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_pin")));
                 if let Some((idx, pinned)) = toggle_pin {
-                    let edit = LayerEdit { pinned: Some(pinned), ..LayerEdit::default() };
+                    let edit = LayerEdit {
+                        pinned: Some(pinned),
+                        ..LayerEdit::default()
+                    };
                     let _ = app.layer_edit(idx, &edit);
                 }
 
@@ -3214,7 +3224,10 @@ impl ApplicationHandler for FosforaApp {
                     .context()
                     .data_mut(|d| d.remove_temp(egui::Id::new("layer_toggle_enable")));
                 if let Some((idx, enabled)) = toggle_enable {
-                    let edit = LayerEdit { enabled: Some(enabled), ..LayerEdit::default() };
+                    let edit = LayerEdit {
+                        enabled: Some(enabled),
+                        ..LayerEdit::default()
+                    };
                     let _ = app.layer_edit(idx, &edit);
                 }
 

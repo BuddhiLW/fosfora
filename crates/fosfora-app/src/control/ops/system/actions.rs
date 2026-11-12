@@ -24,12 +24,20 @@ impl App {
             .collect();
         match trigger {
             TriggerAction::NextEffect if !visible.is_empty() => {
-                let current = self.layer_stack.active().and_then(|l| l.effect_index()).unwrap_or(0);
+                let current = self
+                    .layer_stack
+                    .active()
+                    .and_then(|l| l.effect_index())
+                    .unwrap_or(0);
                 let pos = visible.iter().position(|&i| i == current).unwrap_or(0);
                 self.load_effect(visible[(pos + 1) % visible.len()]);
             }
             TriggerAction::PrevEffect if !visible.is_empty() => {
-                let current = self.layer_stack.active().and_then(|l| l.effect_index()).unwrap_or(0);
+                let current = self
+                    .layer_stack
+                    .active()
+                    .and_then(|l| l.effect_index())
+                    .unwrap_or(0);
                 let pos = visible.iter().position(|&i| i == current).unwrap_or(0);
                 self.load_effect(visible[if pos == 0 { visible.len() - 1 } else { pos - 1 }]);
             }
@@ -68,10 +76,12 @@ impl App {
                 self.process_timeline_event(event);
             }
             TriggerAction::TempoHalf => {
-                self.audio.send_tempo_command(crate::audio::TempoCommand::ShiftOctave(-1));
+                self.audio
+                    .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(-1));
             }
             TriggerAction::TempoDouble => {
-                self.audio.send_tempo_command(crate::audio::TempoCommand::ShiftOctave(1));
+                self.audio
+                    .send_tempo_command(crate::audio::TempoCommand::ShiftOctave(1));
             }
             TriggerAction::TempoTap => self.audio.tap_tempo(),
             TriggerAction::ToggleTimeline => {
@@ -189,7 +199,12 @@ impl App {
     /// Save the live tempo prior into Settings. The audio thread already has
     /// it through the shared mutex.
     pub fn save_tempo_config(&mut self) {
-        self.settings.tempo = self.audio.tempo().lock().unwrap_or_else(|e| e.into_inner()).config;
+        self.settings.tempo = self
+            .audio
+            .tempo()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config;
         self.settings.save();
     }
 
@@ -197,13 +212,18 @@ impl App {
     pub fn theme_list(&self) -> Vec<ThemeMode> {
         ThemeMode::BUILT_IN
             .into_iter()
-            .chain(self.custom_themes.iter().map(|t| ThemeMode::Custom(t.stem.clone())))
+            .chain(
+                self.custom_themes
+                    .iter()
+                    .map(|t| ThemeMode::Custom(t.stem.clone())),
+            )
             .collect()
     }
 
     /// Draw with `theme` and remember it.
     pub fn apply_theme(&mut self, theme: ThemeMode) {
-        self.egui_overlay.set_palette(theme.palette(&self.custom_themes));
+        self.egui_overlay
+            .set_palette(theme.palette(&self.custom_themes));
         if theme != self.settings.theme {
             self.settings.theme = theme;
             self.settings.save();
@@ -212,12 +232,16 @@ impl App {
 
     /// Start recording the output, with audio when capture is running.
     pub fn try_start_recording(&mut self) -> Result<PathBuf, String> {
-        let audio_source = self.audio.active.then(|| crate::recording::encoder::AudioSource {
-            ring: self.audio.recording_ring.clone(),
-            sample_rate: self.audio.recording_rate,
-        });
+        let audio_source = self
+            .audio
+            .active
+            .then(|| crate::recording::encoder::AudioSource {
+                ring: self.audio.recording_ring.clone(),
+                sample_rate: self.audio.recording_rate,
+            });
         let (w, h) = self.render_size();
-        self.recording.start(&self.gpu.device, self.gpu.format, w, h, audio_source)
+        self.recording
+            .start(&self.gpu.device, self.gpu.format, w, h, audio_source)
     }
 
     pub fn stop_recording(&mut self) {
@@ -248,16 +272,25 @@ impl App {
 impl App {
     pub fn set_ndi_enabled(&mut self, on: bool) {
         let (w, h) = self.render_size();
-        self.ndi.set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
+        self.ndi
+            .set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
     }
 
     /// Change NDI settings and save them; the stream restarts when its name
     /// or resolution changed.
     pub fn configure_ndi(&mut self, f: impl FnOnce(&mut crate::ndi::types::NdiConfig)) {
-        let before = (self.ndi.config.source_name.clone(), self.ndi.config.resolution);
+        let before = (
+            self.ndi.config.source_name.clone(),
+            self.ndi.config.resolution,
+        );
         f(&mut self.ndi.config);
         self.ndi.config.save();
-        if before != (self.ndi.config.source_name.clone(), self.ndi.config.resolution) {
+        if before
+            != (
+                self.ndi.config.source_name.clone(),
+                self.ndi.config.resolution,
+            )
+        {
             let (w, h) = self.render_size();
             self.ndi.restart(&self.gpu.device, self.gpu.format, w, h);
         }
@@ -268,7 +301,8 @@ impl App {
 impl App {
     pub fn set_v4l2_enabled(&mut self, on: bool) {
         let (w, h) = self.render_size();
-        self.v4l2.set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
+        self.v4l2
+            .set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
     }
 
     /// Change v4l2 settings and save them; the stream restarts when anything
@@ -291,15 +325,24 @@ impl App {
 impl App {
     pub fn set_spout_enabled(&mut self, on: bool) {
         let (w, h) = self.render_size();
-        self.spout.set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
+        self.spout
+            .set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
     }
 
     /// Change Spout settings and save them; restarts on a name or resolution change.
     pub fn configure_spout(&mut self, f: impl FnOnce(&mut crate::spout::types::SpoutConfig)) {
-        let before = (self.spout.config.sender_name.clone(), self.spout.config.resolution);
+        let before = (
+            self.spout.config.sender_name.clone(),
+            self.spout.config.resolution,
+        );
         f(&mut self.spout.config);
         self.spout.config.save();
-        if before != (self.spout.config.sender_name.clone(), self.spout.config.resolution) {
+        if before
+            != (
+                self.spout.config.sender_name.clone(),
+                self.spout.config.resolution,
+            )
+        {
             let (w, h) = self.render_size();
             self.spout.restart(&self.gpu.device, self.gpu.format, w, h);
         }
@@ -310,15 +353,24 @@ impl App {
 impl App {
     pub fn set_syphon_enabled(&mut self, on: bool) {
         let (w, h) = self.render_size();
-        self.syphon.set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
+        self.syphon
+            .set_enabled(on, &self.gpu.device, self.gpu.format, w, h);
     }
 
     /// Change Syphon settings and save them; restarts on a name or resolution change.
     pub fn configure_syphon(&mut self, f: impl FnOnce(&mut crate::syphon::types::SyphonConfig)) {
-        let before = (self.syphon.config.server_name.clone(), self.syphon.config.resolution);
+        let before = (
+            self.syphon.config.server_name.clone(),
+            self.syphon.config.resolution,
+        );
         f(&mut self.syphon.config);
         self.syphon.config.save();
-        if before != (self.syphon.config.server_name.clone(), self.syphon.config.resolution) {
+        if before
+            != (
+                self.syphon.config.server_name.clone(),
+                self.syphon.config.resolution,
+            )
+        {
             let (w, h) = self.render_size();
             self.syphon.restart(&self.gpu.device, self.gpu.format, w, h);
         }

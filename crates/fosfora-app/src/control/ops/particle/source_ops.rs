@@ -44,7 +44,9 @@ pub fn load_builtin<P: ParticleSourcePort>(port: &mut P, a: &Value) -> OpResult 
 fn load_file<P: ParticleSourcePort>(port: &mut P, a: &Value, kind: MediaKind) -> OpResult {
     let layer = promote::layer(port, a)?;
     let path = promote::path(a)?;
-    let shown = path.as_ref().map_or_else(|| "file dialog".to_owned(), |p| p.display().to_string());
+    let shown = path
+        .as_ref()
+        .map_or_else(|| "file dialog".to_owned(), |p| p.display().to_string());
     port.load_source(layer, SourceLoad::File { kind, path })?;
     Ok(json!({"layer": layer, "kind": kind.name(), "loading": shown}))
 }
@@ -131,7 +133,9 @@ pub fn splat<P: ParticleSourcePort>(port: &mut P, a: &Value) -> OpResult {
 pub fn splat_load<P: ParticleSourcePort>(port: &mut P, a: &Value) -> OpResult {
     let layer = promote::layer(port, a)?;
     let path = promote::path(a)?;
-    let shown = path.as_ref().map_or_else(|| "file dialog".to_owned(), |p| p.display().to_string());
+    let shown = path
+        .as_ref()
+        .map_or_else(|| "file dialog".to_owned(), |p| p.display().to_string());
     port.splat_load(layer, path)?;
     Ok(json!({"layer": layer, "loading": shown}))
 }
@@ -144,7 +148,9 @@ fn load_json(l: &super::port::SourceLoading) -> Value {
 /// loading.
 #[allow(clippy::unnecessary_wraps)] // an OpFn
 pub fn loading<P: ParticleSourcePort>(port: &mut P, _: &Value) -> OpResult {
-    Ok(Value::Array(port.source_loads().iter().map(load_json).collect()))
+    Ok(Value::Array(
+        port.source_loads().iter().map(load_json).collect(),
+    ))
 }
 
 /// `particle/cancel-load`: stop one load, picked by its index or by (a unique
@@ -156,7 +162,10 @@ pub fn cancel_load<P: ParticleSourcePort>(port: &mut P, a: &Value) -> OpResult {
         _ if loads.is_empty() => return Err("no particle source is loading".into()),
         None | Some(Value::Null) if loads.len() == 1 => 0,
         None | Some(Value::Null) => {
-            return Err(format!("{} loads are running; give :load (an index or a file name)", loads.len()));
+            return Err(format!(
+                "{} loads are running; give :load (an index or a file name)",
+                loads.len()
+            ));
         }
         Some(v @ Value::Number(_)) => args::pick(&json!({"index": v}), &names, "source load")?,
         Some(v @ Value::String(_)) => args::pick(&json!({"name": v}), &names, "source load")?,

@@ -23,7 +23,9 @@ pub(super) fn register(globals: &GlobalEnv, ops: OpQueue) {
         let name = str_arg(args, 0)?;
         let edn = str_arg(args, 1)?;
         let json = edn_to_json(&edn).map_err(ValueError::Other)?;
-        let result = ops.call(&name, json, OP_TIMEOUT).map_err(ValueError::Other)?;
+        let result = ops
+            .call(&name, json, OP_TIMEOUT)
+            .map_err(ValueError::Other)?;
         let mut out = String::new();
         json_to_edn(&result, &mut out);
         Ok(str_value(out))
@@ -86,8 +88,16 @@ mod tests {
     #[test]
     fn the_require_form_aliases_every_namespace() {
         let ns = [
-            CljrsNs { ns: "fosfora.preset", alias: "preset", src: "" },
-            CljrsNs { ns: "fosfora.bindings", alias: "bind", src: "" },
+            CljrsNs {
+                ns: "fosfora.preset",
+                alias: "preset",
+                src: "",
+            },
+            CljrsNs {
+                ns: "fosfora.bindings",
+                alias: "bind",
+                src: "",
+            },
         ];
         assert_eq!(
             require_form(&ns).unwrap(),

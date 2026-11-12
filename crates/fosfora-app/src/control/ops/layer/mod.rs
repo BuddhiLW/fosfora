@@ -20,8 +20,8 @@ mod tests;
 use serde_json::{Map, Value, json};
 
 pub use self::port::{
-    EffectPort, EffectView, LayerEdit, LayerKind, LayerPorts, LayerView, MediaLoadView, MediaPort, ParamPort,
-    PostFxPort, StackPort, TransportEdit, TransportView, WebcamList,
+    EffectPort, EffectView, LayerEdit, LayerKind, LayerPorts, LayerView, MediaLoadView, MediaPort,
+    ParamPort, PostFxPort, StackPort, TransportEdit, TransportView, WebcamList,
 };
 use crate::control::{CljrsNs, ControlAddon, OpResult, OpSpec, args};
 use crate::effect::format::PostProcessDef;
@@ -42,20 +42,60 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
     fn ops(&self) -> Vec<OpSpec<C>> {
         vec![
             // Stack
-            OpSpec::new("layer/list", "{}", "Every layer, top first: index, name, kind, effect, blend, opacity...", list::<C>),
-            OpSpec::new("layer/get", LAYER, "One layer (default: the active one).", get::<C>),
-            OpSpec::new("layer/add", "{:at int?}", "Add an empty layer and select it: at position :at (0 = top), else at the bottom.", add::<C>),
-            OpSpec::new("layer/remove", LAYER, "Remove a layer (never the last); returns what was removed.", remove::<C>),
-            OpSpec::new("layer/clear", "{}", "Clear the stack back to the launch layers.", clear::<C>),
-            OpSpec::new("layer/move", "{:index int | :name str, :to int}", "Move a layer to position :to.", move_::<C>),
-            OpSpec::new("layer/select", LAYER, "Make a layer the active one.", select::<C>),
+            OpSpec::new(
+                "layer/list",
+                "{}",
+                "Every layer, top first: index, name, kind, effect, blend, opacity...",
+                list::<C>,
+            ),
+            OpSpec::new(
+                "layer/get",
+                LAYER,
+                "One layer (default: the active one).",
+                get::<C>,
+            ),
+            OpSpec::new(
+                "layer/add",
+                "{:at int?}",
+                "Add an empty layer and select it: at position :at (0 = top), else at the bottom.",
+                add::<C>,
+            ),
+            OpSpec::new(
+                "layer/remove",
+                LAYER,
+                "Remove a layer (never the last); returns what was removed.",
+                remove::<C>,
+            ),
+            OpSpec::new(
+                "layer/clear",
+                "{}",
+                "Clear the stack back to the launch layers.",
+                clear::<C>,
+            ),
+            OpSpec::new(
+                "layer/move",
+                "{:index int | :name str, :to int}",
+                "Move a layer to position :to.",
+                move_::<C>,
+            ),
+            OpSpec::new(
+                "layer/select",
+                LAYER,
+                "Make a layer the active one.",
+                select::<C>,
+            ),
             OpSpec::new(
                 "layer/set",
                 "{:index|:name?, :opacity 0..1?, :blend name?, :displace 0..1?, :enabled?, :locked?, :pinned?, :rename str|nil?}",
                 "Change a layer's own fields; a locked layer refuses blend/opacity/displace/enabled.",
                 set::<C>,
             ),
-            OpSpec::new("layer/blend-modes", "{}", "Every blend mode by name, in menu order, with its family.", blend_modes::<C>),
+            OpSpec::new(
+                "layer/blend-modes",
+                "{}",
+                "Every blend mode by name, in menu order, with its family.",
+                blend_modes::<C>,
+            ),
             // Effects
             OpSpec::new(
                 "layer/effects",
@@ -69,33 +109,98 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
                 "Run an effect on a layer (default: the active one).",
                 load_effect::<C>,
             ),
-            OpSpec::new("layer/favorite", "{:effect int|str, :on bool?}", "Star or unstar an effect (toggles without :on).", favorite::<C>),
-            OpSpec::new("layer/create-effect", "{:name str}", "Write a new effect from the template and load it.", create_effect::<C>),
+            OpSpec::new(
+                "layer/favorite",
+                "{:effect int|str, :on bool?}",
+                "Star or unstar an effect (toggles without :on).",
+                favorite::<C>,
+            ),
+            OpSpec::new(
+                "layer/create-effect",
+                "{:name str}",
+                "Write a new effect from the template and load it.",
+                create_effect::<C>,
+            ),
             OpSpec::new(
                 "layer/copy-effect",
                 "{:as str, :effect int|str?}",
                 "Copy an effect (default: the active layer's) to a new user effect and load it.",
                 copy_effect::<C>,
             ),
-            OpSpec::new("layer/delete-effect", "{:effect int|str}", "Delete a user effect's files.", delete_effect::<C>),
-            OpSpec::new("layer/edit-shader", LAYER, "Open a layer's shader in the editor.", edit_shader::<C>),
-            OpSpec::new("layer/save-shader", "{}", "Save the shader editor's dirty tabs.", save_shader::<C>),
-            OpSpec::new("layer/shader-source", LAYER, "The WGSL a layer's effect runs: :source (first pass) and :passes.", loading::shader_source::<C>),
+            OpSpec::new(
+                "layer/delete-effect",
+                "{:effect int|str}",
+                "Delete a user effect's files.",
+                delete_effect::<C>,
+            ),
+            OpSpec::new(
+                "layer/edit-shader",
+                LAYER,
+                "Open a layer's shader in the editor.",
+                edit_shader::<C>,
+            ),
+            OpSpec::new(
+                "layer/save-shader",
+                "{}",
+                "Save the shader editor's dirty tabs.",
+                save_shader::<C>,
+            ),
+            OpSpec::new(
+                "layer/shader-source",
+                LAYER,
+                "The WGSL a layer's effect runs: :source (first pass) and :passes.",
+                loading::shader_source::<C>,
+            ),
             // Params
-            OpSpec::new("layer/params", LAYER, "A layer's params: type, value, range, default, normalized.", params::<C>),
-            OpSpec::new("layer/param", "{:param str, :index|:name layer?}", "One param of a layer.", param::<C>),
+            OpSpec::new(
+                "layer/params",
+                LAYER,
+                "A layer's params: type, value, range, default, normalized.",
+                params::<C>,
+            ),
+            OpSpec::new(
+                "layer/param",
+                "{:param str, :index|:name layer?}",
+                "One param of a layer.",
+                param::<C>,
+            ),
             OpSpec::new(
                 "layer/set-param",
                 "{:param str, :value num|bool|[..], :normalized bool?, :index|:name layer?}",
                 "Set a param in real units (or 0..1 with :normalized true); out-of-range is refused.",
                 set_param::<C>,
             ),
-            OpSpec::new("layer/reset-param", "{:param str?, :index|:name layer?}", "Reset one param (or all) to the effect's defaults.", reset_param::<C>),
+            OpSpec::new(
+                "layer/reset-param",
+                "{:param str?, :index|:name layer?}",
+                "Reset one param (or all) to the effect's defaults.",
+                reset_param::<C>,
+            ),
             // Media
-            OpSpec::new("layer/add-media", "{:path str}", "Decode an image or video into a new layer (appears when ready).", add_media::<C>),
-            OpSpec::new("layer/loading", "{}", "Media files still decoding into new layers: index, file, frames done/total, secs.", loading::loading::<C>),
-            OpSpec::new("layer/cancel-media", "{:load int|str?}", "Stop decoding a pending media file (the only one without :load).", loading::cancel_media::<C>),
-            OpSpec::new("layer/media", LAYER, "A media layer's transport: playing, loop, speed, direction, position.", media::<C>),
+            OpSpec::new(
+                "layer/add-media",
+                "{:path str}",
+                "Decode an image or video into a new layer (appears when ready).",
+                add_media::<C>,
+            ),
+            OpSpec::new(
+                "layer/loading",
+                "{}",
+                "Media files still decoding into new layers: index, file, frames done/total, secs.",
+                loading::loading::<C>,
+            ),
+            OpSpec::new(
+                "layer/cancel-media",
+                "{:load int|str?}",
+                "Stop decoding a pending media file (the only one without :load).",
+                loading::cancel_media::<C>,
+            ),
+            OpSpec::new(
+                "layer/media",
+                LAYER,
+                "A media layer's transport: playing, loop, speed, direction, position.",
+                media::<C>,
+            ),
             OpSpec::new(
                 "layer/transport",
                 "{:index|:name?, :toggle?, :playing?, :loop?, :speed num?, :direction forward|reverse|ping-pong?, :seek secs?}",
@@ -103,17 +208,67 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
                 transport::<C>,
             ),
             // Webcams
-            OpSpec::new("layer/webcams", "{}", "The cameras (and streams) to pick from, and the default.", webcams::<C>),
-            OpSpec::new("layer/add-webcam", "{:device int|str?}", "Add a camera layer (default: the next unused camera).", add_webcam::<C>),
-            OpSpec::new("layer/switch-webcam", "{:device int|str, :index|:name layer?}", "Point a camera layer at another camera.", switch_webcam::<C>),
-            OpSpec::new("layer/mirror", "{:on bool, :index|:name layer?}", "Mirror a camera layer.", mirror::<C>),
-            OpSpec::new("layer/webcam-backend", "{:ffmpeg bool}", "Capture cameras through FFmpeg or the native backend.", webcam_backend::<C>),
-            OpSpec::new("layer/streams", "{:streams [{:name :url :enabled :listen}]?}", "Read, or replace, the network streams offered as cameras.", streams::<C>),
+            OpSpec::new(
+                "layer/webcams",
+                "{}",
+                "The cameras (and streams) to pick from, and the default.",
+                webcams::<C>,
+            ),
+            OpSpec::new(
+                "layer/add-webcam",
+                "{:device int|str?}",
+                "Add a camera layer (default: the next unused camera).",
+                add_webcam::<C>,
+            ),
+            OpSpec::new(
+                "layer/switch-webcam",
+                "{:device int|str, :index|:name layer?}",
+                "Point a camera layer at another camera.",
+                switch_webcam::<C>,
+            ),
+            OpSpec::new(
+                "layer/mirror",
+                "{:on bool, :index|:name layer?}",
+                "Mirror a camera layer.",
+                mirror::<C>,
+            ),
+            OpSpec::new(
+                "layer/webcam-backend",
+                "{:ffmpeg bool}",
+                "Capture cameras through FFmpeg or the native backend.",
+                webcam_backend::<C>,
+            ),
+            OpSpec::new(
+                "layer/streams",
+                "{:streams [{:name :url :enabled :listen}]?}",
+                "Read, or replace, the network streams offered as cameras.",
+                streams::<C>,
+            ),
             // Post-processing
-            OpSpec::new("layer/postfx", "{:set {key value}?}", "Master post-processing; :set changes any of its fields.", postfx::<C>),
-            OpSpec::new("layer/adopt-postfx", LAYER, "Make a layer's effect's own post-processing Master's.", adopt_postfx::<C>),
-            OpSpec::new("layer/postfx-previous", "{}", "Go back to the post-processing the last replacement replaced.", postfx_previous::<C>),
-            OpSpec::new("layer/postfx-defaults", "{}", "Reset Master post-processing to the defaults.", postfx_defaults::<C>),
+            OpSpec::new(
+                "layer/postfx",
+                "{:set {key value}?}",
+                "Master post-processing; :set changes any of its fields.",
+                postfx::<C>,
+            ),
+            OpSpec::new(
+                "layer/adopt-postfx",
+                LAYER,
+                "Make a layer's effect's own post-processing Master's.",
+                adopt_postfx::<C>,
+            ),
+            OpSpec::new(
+                "layer/postfx-previous",
+                "{}",
+                "Go back to the post-processing the last replacement replaced.",
+                postfx_previous::<C>,
+            ),
+            OpSpec::new(
+                "layer/postfx-defaults",
+                "{}",
+                "Reset Master post-processing to the defaults.",
+                postfx_defaults::<C>,
+            ),
         ]
     }
 
@@ -278,13 +433,21 @@ pub fn transport_edit_from(a: &Value) -> Result<TransportEdit, String> {
     };
     let seek_secs = match opt_num(a, "seek")? {
         Some(s) if s >= 0.0 => Some(s),
-        Some(s) => return Err(format!(":seek must be a non-negative number of seconds, got {s}")),
+        Some(s) => {
+            return Err(format!(
+                ":seek must be a non-negative number of seconds, got {s}"
+            ));
+        }
         None => None,
     };
     let direction = match a.get("direction") {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) => Some(direction_from_name(s)?),
-        Some(v) => return Err(format!(":direction must be forward, reverse or ping-pong, got {v}")),
+        Some(v) => {
+            return Err(format!(
+                ":direction must be forward, reverse or ping-pong, got {v}"
+            ));
+        }
     };
     Ok(TransportEdit {
         toggle: opt_flag(a, "toggle")?.unwrap_or(false),
@@ -336,7 +499,9 @@ pub fn direction_from_name(name: &str) -> Result<PlayDirection, String> {
         "forward" => Ok(PlayDirection::Forward),
         "reverse" => Ok(PlayDirection::Reverse),
         "pingpong" => Ok(PlayDirection::PingPong),
-        _ => Err(format!("no direction {name:?}; forward, reverse or ping-pong")),
+        _ => Err(format!(
+            "no direction {name:?}; forward, reverse or ping-pong"
+        )),
     }
 }
 
@@ -456,7 +621,9 @@ fn real_of(t: f32, lo: f32, hi: f32) -> f32 {
 /// `v` as 0..1 of `def`'s range (Float and Point2D only).
 pub fn normalize(def: &ParamDef, v: &ParamValue) -> Option<Value> {
     match (def, v) {
-        (ParamDef::Float { min, max, .. }, ParamValue::Float(x)) => Some(json!(unit_of(*x, *min, *max))),
+        (ParamDef::Float { min, max, .. }, ParamValue::Float(x)) => {
+            Some(json!(unit_of(*x, *min, *max)))
+        }
         #[allow(clippy::cast_precision_loss)]
         (ParamDef::Int { min, max, .. }, ParamValue::Float(x)) => {
             Some(json!(unit_of(*x, *min as f32, *max as f32)))
@@ -486,10 +653,6 @@ pub fn param_json(def: &ParamDef, value: Option<&ParamValue>) -> Value {
             out["max"] = json!(max);
         }
         ParamDef::Float { min, max, .. } => {
-            out["min"] = json!(min);
-            out["max"] = json!(max);
-        }
-        ParamDef::Int { min, max, .. } => {
             out["min"] = json!(min);
             out["max"] = json!(max);
         }
@@ -550,9 +713,13 @@ pub fn promote_param(def: &ParamDef, raw: &Value, normalized: bool) -> Result<Pa
             let x = ranged(num_in(raw, what)?, lo, hi, normalized, what)?;
             Ok(ParamValue::Float(x.round().clamp(lo.min(hi), hi.max(lo))))
         }
-        ParamDef::Float { min, max, .. } => {
-            Ok(ParamValue::Float(ranged(num_in(raw, what)?, *min, *max, normalized, what)?))
-        }
+        ParamDef::Float { min, max, .. } => Ok(ParamValue::Float(ranged(
+            num_in(raw, what)?,
+            *min,
+            *max,
+            normalized,
+            what,
+        )?)),
         ParamDef::Bool { .. } => match raw {
             Value::Bool(b) => Ok(ParamValue::Bool(*b)),
             Value::Number(_) if normalized => Ok(ParamValue::Bool(num_in(raw, what)? > 0.5)),
@@ -601,13 +768,17 @@ pub fn merge_postfx(base: &PostProcessDef, patch: &Value) -> Result<PostProcessD
         }
         merged.insert(key, v.clone());
     }
-    serde_json::from_value(Value::Object(merged)).map_err(|e| format!("bad post-processing value: {e}"))
+    serde_json::from_value(Value::Object(merged))
+        .map_err(|e| format!("bad post-processing value: {e}"))
 }
 
 fn postfx_json<P: PostFxPort>(port: &P) -> Value {
     let mut v = serde_json::to_value(port.postprocess()).unwrap_or(Value::Null);
     if let Value::Object(m) = &mut v {
-        m.insert("has-previous".into(), json!(port.has_previous_postprocess()));
+        m.insert(
+            "has-previous".into(),
+            json!(port.has_previous_postprocess()),
+        );
     }
     v
 }
@@ -720,7 +891,9 @@ fn effect_names<P: EffectPort>(port: &P) -> (Vec<EffectView>, Vec<String>) {
 }
 
 fn effect_arg<P: EffectPort>(port: &P, a: &Value) -> Result<(usize, Vec<EffectView>), String> {
-    let v = a.get("effect").ok_or("missing arg :effect (an index or a name)")?;
+    let v = a
+        .get("effect")
+        .ok_or("missing arg :effect (an index or a name)")?;
     let (effects, names) = effect_names(port);
     Ok((pick_in(v, &names, "effect")?, effects))
 }
@@ -734,7 +907,9 @@ fn effects<P: EffectPort>(port: &mut P, a: &Value) -> OpResult {
         args::opt_str(a, "query"),
         opt_flag(a, "hidden")?.unwrap_or(false),
     );
-    Ok(Value::Array(keep.into_iter().map(|i| effect_json(i, &all[i])).collect()))
+    Ok(Value::Array(
+        keep.into_iter().map(|i| effect_json(i, &all[i])).collect(),
+    ))
 }
 
 fn load_effect<P: StackPort + EffectPort>(port: &mut P, a: &Value) -> OpResult {
@@ -798,7 +973,10 @@ fn copy_effect<P: StackPort + EffectPort>(port: &mut P, a: &Value) -> OpResult {
 fn delete_effect<P: EffectPort>(port: &mut P, a: &Value) -> OpResult {
     let (i, effects) = effect_arg(port, a)?;
     if effects[i].builtin {
-        return Err(format!("{} is built in and cannot be deleted", effects[i].name));
+        return Err(format!(
+            "{} is built in and cannot be deleted",
+            effects[i].name
+        ));
     }
     let name = port.delete_effect(i)?;
     Ok(json!({"index": i, "name": name}))
@@ -880,7 +1058,10 @@ fn add_media<P: MediaPort>(port: &mut P, a: &Value) -> OpResult {
     Ok(json!({"path": path, "pending": true}))
 }
 
-fn media_layer<P: StackPort + MediaPort>(port: &P, a: &Value) -> Result<(usize, TransportView), String> {
+fn media_layer<P: StackPort + MediaPort>(
+    port: &P,
+    a: &Value,
+) -> Result<(usize, TransportView), String> {
     let layer = layer_target(port, a)?;
     let t = port
         .transport(layer)
@@ -948,7 +1129,9 @@ fn switch_webcam<P: StackPort + MediaPort>(port: &mut P, a: &Value) -> OpResult 
     if port.layers().get(layer).map(|l| l.kind) != Some(LayerKind::Webcam) {
         return Err(format!("layer {layer} is not a camera layer"));
     }
-    let v = a.get("device").ok_or("missing arg :device (an index or a name)")?;
+    let v = a
+        .get("device")
+        .ok_or("missing arg :device (an index or a name)")?;
     let (device, _) = device_arg(&port.webcams()?, v)?;
     let name = port.switch_webcam(layer, device)?;
     Ok(json!({"layer": layer, "device": name}))

@@ -36,7 +36,12 @@ pub trait ParticleSimPort: ParticleLayers {
     fn volumetric(&self) -> (bool, VolumetricParams);
     fn set_volumetric(&mut self, enabled: bool, params: VolumetricParams);
     fn lattice(&self, layer: usize) -> Option<LatticeParams>;
-    fn set_lattice(&mut self, layer: usize, params: LatticeParams, reseed: bool) -> Result<(), String>;
+    fn set_lattice(
+        &mut self,
+        layer: usize,
+        params: LatticeParams,
+        reseed: bool,
+    ) -> Result<(), String>;
     fn helix(&self, layer: usize) -> Option<HelixParams>;
     fn set_helix(&mut self, layer: usize, params: HelixParams) -> Result<(), String>;
 }
@@ -65,9 +70,18 @@ pub trait ParticleSourcePort: ParticleLayers {
 /// The obstacle a particle system collides with.
 pub trait ObstaclePort: ParticleLayers {
     fn obstacle_state(&self, layer: usize) -> Option<ObstacleState>;
-    fn obstacle_command(&mut self, layer: usize, cmd: ObstacleCommand) -> Result<ObstacleFollowUp, String>;
+    fn obstacle_command(
+        &mut self,
+        layer: usize,
+        cmd: ObstacleCommand,
+    ) -> Result<ObstacleFollowUp, String>;
     /// Load an obstacle file; only a video may come from the dialog (`None`).
-    fn load_obstacle(&mut self, layer: usize, kind: MediaKind, path: Option<PathBuf>) -> Result<(), String>;
+    fn load_obstacle(
+        &mut self,
+        layer: usize,
+        kind: MediaKind,
+        path: Option<PathBuf>,
+    ) -> Result<(), String>;
     /// Feed camera obstacles from listed camera `index`.
     fn switch_obstacle_webcam(&mut self, index: u32) -> Result<(), String>;
 }
@@ -76,7 +90,12 @@ pub trait ObstaclePort: ParticleLayers {
 pub trait MorphPort: ParticleLayers {
     fn morph_state(&self, layer: usize) -> Option<MorphView>;
     /// Apply `edit`, putting new targets in `slot` (else the next empty one).
-    fn apply_morph(&mut self, layer: usize, edit: &MorphEdit, slot: Option<u32>) -> Result<(), String>;
+    fn apply_morph(
+        &mut self,
+        layer: usize,
+        edit: &MorphEdit,
+        slot: Option<u32>,
+    ) -> Result<(), String>;
 }
 
 // ── App adapters ────────────────────────────────────────────────────────────
@@ -135,7 +154,12 @@ impl ParticleSimPort for App {
         ps.lattice_enabled.then_some(ps.lattice_params)
     }
 
-    fn set_lattice(&mut self, layer: usize, params: LatticeParams, reseed: bool) -> Result<(), String> {
+    fn set_lattice(
+        &mut self,
+        layer: usize,
+        params: LatticeParams,
+        reseed: bool,
+    ) -> Result<(), String> {
         self.apply_lattice(layer, params, reseed)
     }
 
@@ -274,11 +298,20 @@ impl ObstaclePort for App {
         })
     }
 
-    fn obstacle_command(&mut self, layer: usize, cmd: ObstacleCommand) -> Result<ObstacleFollowUp, String> {
+    fn obstacle_command(
+        &mut self,
+        layer: usize,
+        cmd: ObstacleCommand,
+    ) -> Result<ObstacleFollowUp, String> {
         self.apply_obstacle_command(layer, cmd)
     }
 
-    fn load_obstacle(&mut self, layer: usize, kind: MediaKind, path: Option<PathBuf>) -> Result<(), String> {
+    fn load_obstacle(
+        &mut self,
+        layer: usize,
+        kind: MediaKind,
+        path: Option<PathBuf>,
+    ) -> Result<(), String> {
         match (kind, path) {
             (MediaKind::Video, path) => self.load_obstacle_video(layer, path),
             (_, Some(p)) if p.is_file() => self.load_obstacle_file(layer, &p),
@@ -320,7 +353,12 @@ impl MorphPort for App {
         })
     }
 
-    fn apply_morph(&mut self, layer: usize, edit: &MorphEdit, slot: Option<u32>) -> Result<(), String> {
+    fn apply_morph(
+        &mut self,
+        layer: usize,
+        edit: &MorphEdit,
+        slot: Option<u32>,
+    ) -> Result<(), String> {
         App::apply_morph(self, layer, edit, slot).map(|_| ())
     }
 }

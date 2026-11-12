@@ -30,10 +30,13 @@ pub fn parse_named<T: Copy>(
     what: &str,
 ) -> Result<T, String> {
     let want = slug(raw);
-    all.iter().copied().find(|&t| slug(name(t)) == want).ok_or_else(|| {
-        let names: Vec<&str> = all.iter().map(|&t| name(t)).collect();
-        format!("{what} must be one of {}, got {raw:?}", names.join(", "))
-    })
+    all.iter()
+        .copied()
+        .find(|&t| slug(name(t)) == want)
+        .ok_or_else(|| {
+            let names: Vec<&str> = all.iter().map(|&t| name(t)).collect();
+            format!("{what} must be one of {}, got {raw:?}", names.join(", "))
+        })
 }
 
 /// `a[key]` as one of `all`; absent is `None`.
@@ -364,7 +367,9 @@ pub fn tempo_bpm(bpm: f64) -> Result<f64, String> {
     if bpm.is_finite() && (BPM_MIN..=BPM_MAX).contains(&bpm) {
         Ok(bpm)
     } else {
-        Err(format!(":bpm must be between {BPM_MIN} and {BPM_MAX}, got {bpm}"))
+        Err(format!(
+            ":bpm must be between {BPM_MIN} and {BPM_MAX}, got {bpm}"
+        ))
     }
 }
 
@@ -479,19 +484,24 @@ pub struct RecordingChange {
 
 impl RecordingChange {
     pub fn from_args(a: &Value) -> Result<Self, String> {
-        let ranged = |key: &str, range: std::ops::RangeInclusive<u32>| -> Result<Option<u32>, String> {
-            match a.get(key) {
-                None => Ok(None),
-                Some(v) => v
-                    .as_u64()
-                    .and_then(|n| u32::try_from(n).ok())
-                    .filter(|n| range.contains(n))
-                    .map(Some)
-                    .ok_or_else(|| {
-                        format!(":{key} must be an integer in {}..={}", range.start(), range.end())
-                    }),
-            }
-        };
+        let ranged =
+            |key: &str, range: std::ops::RangeInclusive<u32>| -> Result<Option<u32>, String> {
+                match a.get(key) {
+                    None => Ok(None),
+                    Some(v) => v
+                        .as_u64()
+                        .and_then(|n| u32::try_from(n).ok())
+                        .filter(|n| range.contains(n))
+                        .map(Some)
+                        .ok_or_else(|| {
+                            format!(
+                                ":{key} must be an integer in {}..={}",
+                                range.start(),
+                                range.end()
+                            )
+                        }),
+                }
+            };
         Ok(Self {
             codec: opt_named(a, "codec", VideoCodec::ALL, codec_name)?,
             resolution: opt_named(a, "resolution", OutputResolution::ALL, resolution_name)?,
@@ -643,7 +653,9 @@ pub fn ui_scale_arg(a: &Value) -> Result<Option<f32>, String> {
         None => Ok(None),
         Some(_) => match args::opt_f32(a, "scale") {
             Some(s) if s.is_finite() && (lo..=hi).contains(&s) => Ok(Some(s)),
-            _ => Err(format!(":scale must be a number in {lo}..={hi} (1.0 = 100 %)")),
+            _ => Err(format!(
+                ":scale must be a number in {lo}..={hi} (1.0 = 100 %)"
+            )),
         },
     }
 }

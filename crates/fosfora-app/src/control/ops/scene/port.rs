@@ -120,9 +120,9 @@ impl CuePort for App {
             loop_mode: info.loop_mode,
             advance: info.advance_mode,
             transition: match info.state {
-                TimelineInfoState::Transitioning { from, to, progress, .. } => {
-                    Some((from, to, progress))
-                }
+                TimelineInfoState::Transitioning {
+                    from, to, progress, ..
+                } => Some((from, to, progress)),
                 _ => None,
             },
         }

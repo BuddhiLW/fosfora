@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 pub enum ParamDef {
     /// Discrete scalar. Runtime scalar storage and the GPU ABI remain f32;
     /// editors and control mappings round/clamp to these integer bounds.
-    Int { name: String, default: i32, min: i32, max: i32 },
+    Int {
+        name: String,
+        default: i32,
+        min: i32,
+        max: i32,
+    },
     Float {
         name: String,
         default: f32,
@@ -51,7 +56,12 @@ impl ParamDef {
     /// Update the default value from a ParamValue. Type must match (ignored otherwise).
     pub fn set_default(&mut self, value: &ParamValue) {
         match (self, value) {
-            (ParamDef::Int { default, min, max, .. }, ParamValue::Float(v)) => *default = (*v as i32).clamp(*min, *max),
+            (
+                ParamDef::Int {
+                    default, min, max, ..
+                },
+                ParamValue::Float(v),
+            ) => *default = (*v as i32).clamp(*min, *max),
             (ParamDef::Float { default, .. }, ParamValue::Float(v)) => *default = *v,
             (ParamDef::Color { default, .. }, ParamValue::Color(v)) => *default = *v,
             (ParamDef::Bool { default, .. }, ParamValue::Bool(v)) => *default = *v,

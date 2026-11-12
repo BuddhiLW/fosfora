@@ -100,7 +100,11 @@ impl ShaderPipeline {
         Ok(())
     }
 
-    fn create_bind_group_layout(device: &Device, input_count: usize, unfilterable: &[usize]) -> BindGroupLayout {
+    fn create_bind_group_layout(
+        device: &Device,
+        input_count: usize,
+        unfilterable: &[usize],
+    ) -> BindGroupLayout {
         // Fixed bindings 0-6, then `input_count` multi-pass inputs at 7+2i (texture) /
         // 8+2i (sampler) — the #1481 pass graph. Built as a Vec so the input tail is
         // variable-length.
@@ -185,7 +189,9 @@ impl ShaderPipeline {
                 binding: 7 + 2 * i,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: !unfilterable.contains(&(i as usize)) },
+                    sample_type: TextureSampleType::Float {
+                        filterable: !unfilterable.contains(&(i as usize)),
+                    },
                     view_dimension: TextureViewDimension::D2,
                     multisampled: false,
                 },
@@ -194,7 +200,11 @@ impl ShaderPipeline {
             entries.push(BindGroupLayoutEntry {
                 binding: 8 + 2 * i,
                 visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Sampler(if unfilterable.contains(&(i as usize)) { SamplerBindingType::NonFiltering } else { SamplerBindingType::Filtering }),
+                ty: BindingType::Sampler(if unfilterable.contains(&(i as usize)) {
+                    SamplerBindingType::NonFiltering
+                } else {
+                    SamplerBindingType::Filtering
+                }),
                 count: None,
             });
         }

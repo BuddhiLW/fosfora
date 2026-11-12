@@ -233,7 +233,11 @@ impl App {
 
     /// Make camera `device` (the default one for `None`) `layer`'s particle
     /// source. Marks the preset dirty.
-    pub fn use_particle_webcam(&mut self, layer: usize, device: Option<String>) -> Result<(), String> {
+    pub fn use_particle_webcam(
+        &mut self,
+        layer: usize,
+        device: Option<String>,
+    ) -> Result<(), String> {
         particles(&self.layer_stack, layer)?;
         #[cfg(feature = "webcam")]
         {
@@ -302,8 +306,9 @@ impl App {
         if self.splat_demo_download.is_some() {
             return Err("the demo scene is already downloading".into());
         }
-        self.splat_demo_download =
-            Some(crate::gpu::particle::splat_source::download_demo_scene("default"));
+        self.splat_demo_download = Some(crate::gpu::particle::splat_source::download_demo_scene(
+            "default",
+        ));
         Ok(())
     }
 }

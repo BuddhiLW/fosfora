@@ -5,12 +5,12 @@
 
 use std::path::PathBuf;
 
+#[cfg(not(feature = "link"))]
+use super::model::NO_LINK;
 use super::model::{
     LinkChange, LinkState, OutputChange, OutputKind, OutputStatus, RecordingChange,
     RecordingStatus, SettingsView, ViewState, WebStatus, Workspace,
 };
-#[cfg(not(feature = "link"))]
-use super::model::NO_LINK;
 use crate::app::App;
 use crate::audio::beat::{TempoCommand, TempoConfig};
 use crate::midi::types::TriggerAction;
@@ -48,7 +48,11 @@ pub trait OutputPort {
     fn output_status(&self, kind: OutputKind) -> OutputStatus;
     fn set_output_enabled(&mut self, kind: OutputKind, on: bool) -> Result<(), String>;
     /// Apply `changes` (all accepted by `kind`), saved, restarting the sink once.
-    fn configure_output(&mut self, kind: OutputKind, changes: &[OutputChange]) -> Result<(), String>;
+    fn configure_output(
+        &mut self,
+        kind: OutputKind,
+        changes: &[OutputChange],
+    ) -> Result<(), String>;
     /// Re-scan v4l2 loopback devices.
     fn refresh_v4l2_devices(&mut self) -> Result<(), String>;
     /// Every display (by label) and the one the output window is on.
@@ -122,12 +126,21 @@ impl<T: TempoPort + RecordingPort + OutputPort + SettingsPort + ShellPort> Syste
 
 impl TempoPort for App {
     fn tempo_state(&self) -> (TempoConfig, f32) {
-        let cfg = self.audio.tempo().lock().unwrap_or_else(|e| e.into_inner()).config;
+        let cfg = self
+            .audio
+            .tempo()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config;
         (cfg, self.uniforms.bpm * 300.0)
     }
 
     fn set_tempo_config(&mut self, cfg: TempoConfig) {
-        self.audio.tempo().lock().unwrap_or_else(|e| e.into_inner()).config = cfg;
+        self.audio
+            .tempo()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config = cfg;
         self.save_tempo_config();
     }
 
@@ -249,7 +262,10 @@ impl SettingsPort for App {
 
     fn themes(&self) -> (Vec<String>, Option<usize>) {
         let list = self.theme_list();
-        let names = list.iter().map(|t| t.display_name(&self.custom_themes)).collect();
+        let names = list
+            .iter()
+            .map(|t| t.display_name(&self.custom_themes))
+            .collect();
         (names, list.iter().position(|t| *t == self.settings.theme))
     }
 
@@ -356,7 +372,10 @@ impl ShellPort for App {
     }
 
     fn tour_names(&self) -> Vec<String> {
-        crate::ui::tour::Tour::ALL.iter().map(|t| t.name().to_string()).collect()
+        crate::ui::tour::Tour::ALL
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect()
     }
 
     fn tours_taken(&self) -> Vec<bool> {

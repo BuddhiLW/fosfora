@@ -8,7 +8,6 @@ pub mod catalog_media;
 pub mod catalog_panel;
 pub mod cue_strip;
 pub mod helix_panel;
-pub mod svg_offset_panel;
 pub mod lattice_panel;
 pub mod layer_panel;
 #[cfg(feature = "link")]
@@ -30,6 +29,7 @@ pub mod shader_editor;
 pub mod spout_panel;
 pub mod stack_panel;
 pub mod status_bar;
+pub mod svg_offset_panel;
 #[cfg(all(target_os = "macos", feature = "syphon"))]
 pub mod syphon_panel;
 pub mod timeline_bar;

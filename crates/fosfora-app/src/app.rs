@@ -3120,8 +3120,14 @@ impl App {
                     obstacle_model,
                     lattice,
                     helix,
-                    svg_offset_path: l.as_effect().and_then(|e| e.pass_executor.svg_offset.as_ref()).and_then(|s| s.path.clone()),
-                    svg_offset_settings: l.as_effect().and_then(|e| e.pass_executor.svg_offset.as_ref()).map(|s| s.settings.clone()),
+                    svg_offset_path: l
+                        .as_effect()
+                        .and_then(|e| e.pass_executor.svg_offset.as_ref())
+                        .and_then(|s| s.path.clone()),
+                    svg_offset_settings: l
+                        .as_effect()
+                        .and_then(|e| e.pass_executor.svg_offset.as_ref())
+                        .map(|s| s.settings.clone()),
                     particle_sim,
                     chain,
                 }
@@ -3972,12 +3978,28 @@ impl App {
                 layer.custom_name = lp.custom_name.clone();
                 if let Some(e) = layer.as_effect_mut() {
                     if let Some(svg) = &mut e.pass_executor.svg_offset {
-                        let settings = lp.svg_offset_settings.clone().unwrap_or_else(|| svg.settings.clone());
-                        if let Err(err) = svg.reload(&device, &self.gpu.queue, lp.svg_offset_path.as_deref(), settings, self.render_size.0, self.render_size.1) {
+                        let settings = lp
+                            .svg_offset_settings
+                            .clone()
+                            .unwrap_or_else(|| svg.settings.clone());
+                        if let Err(err) = svg.reload(
+                            &device,
+                            &self.gpu.queue,
+                            lp.svg_offset_path.as_deref(),
+                            settings,
+                            self.render_size.0,
+                            self.render_size.1,
+                        ) {
                             log::warn!("SVG preset source: {err}");
-                            self.status_error = Some((format!("SVG preset source: {err}"), Instant::now()));
+                            self.status_error =
+                                Some((format!("SVG preset source: {err}"), Instant::now()));
                         }
-                        e.pass_executor.rebuild_all_bind_groups(&device, &e.uniform_buffer, &self.placeholder, &self.audio_textures);
+                        e.pass_executor.rebuild_all_bind_groups(
+                            &device,
+                            &e.uniform_buffer,
+                            &self.placeholder,
+                            &self.audio_textures,
+                        );
                     }
                 }
                 // Restore live particle-sim / Lattice panel edits over the

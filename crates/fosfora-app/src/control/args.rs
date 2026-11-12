@@ -76,7 +76,9 @@ pub fn opt_transition(
         "cut" => Ok(Some(T::Cut)),
         "dissolve" => Ok(Some(T::Dissolve)),
         "morph" | "param_morph" | "parammorph" => Ok(Some(T::ParamMorph)),
-        _ => Err(format!(":{key} must be cut, dissolve or morph, got {raw:?}")),
+        _ => Err(format!(
+            ":{key} must be cut, dissolve or morph, got {raw:?}"
+        )),
     }
 }
 
@@ -97,7 +99,10 @@ pub fn pick<S: AsRef<str>>(args: &Value, names: &[S], what: &str) -> Result<usiz
         return if i < names.len() {
             Ok(i)
         } else {
-            Err(format!("{what} index {i} out of range (have {})", names.len()))
+            Err(format!(
+                "{what} index {i} out of range (have {})",
+                names.len()
+            ))
         };
     }
     let name = str(args, "name").map_err(|_| format!("give {what} as :index or :name"))?;
@@ -143,7 +148,12 @@ mod tests {
             let a = json!({"k": transition_name(kind)});
             assert_eq!(opt_transition(&a, "k"), Ok(Some(kind)));
         }
-        assert_eq!(opt_transition(&json!({"k": "Param-Morph"}), "k").unwrap().map(transition_name), Some("morph"));
+        assert_eq!(
+            opt_transition(&json!({"k": "Param-Morph"}), "k")
+                .unwrap()
+                .map(transition_name),
+            Some("morph")
+        );
         assert_eq!(opt_transition(&json!({}), "k"), Ok(None));
         assert!(opt_transition(&json!({"k": "wipe"}), "k").is_err());
     }

@@ -276,7 +276,11 @@ impl App {
     }
 
     /// Apply `edit` to media layer `layer`'s transport.
-    pub fn media_transport_edit(&mut self, layer: usize, edit: &TransportEdit) -> Result<(), String> {
+    pub fn media_transport_edit(
+        &mut self,
+        layer: usize,
+        edit: &TransportEdit,
+    ) -> Result<(), String> {
         let len = self.layer_stack.layers.len();
         let m = self
             .layer_stack
@@ -327,10 +331,10 @@ impl App {
         let before = self.layer_stack.layers.len();
         self.add_webcam_layer(&name);
         if self.layer_stack.layers.len() == before {
-            return Err(self
-                .status_error
-                .as_ref()
-                .map_or_else(|| format!("could not add camera {name:?}"), |(m, _)| m.clone()));
+            return Err(self.status_error.as_ref().map_or_else(
+                || format!("could not add camera {name:?}"),
+                |(m, _)| m.clone(),
+            ));
         }
         self.preset_store.mark_dirty();
         Ok(name)

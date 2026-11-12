@@ -14,13 +14,13 @@ const MAIN_RS: &str = include_str!("../main.rs");
 
 /// UI signals with no op, and why.
 const EXEMPT: &[(&str, &str)] = &[
-    ("tour_done", "onboarding tour bookkeeping; no show state changes"),
-    ("dismiss_shader_error", "closes an error toast in the window"),
-    ("quit_dialog_shown", "whether the unsaved-changes quit dialog is open; sys/quit is the action"),
     (
-        "svg_offset_cmd",
-        "the SVG offset panel arrived with the media-pack merge after the ops were cut; \
-         no svg op yet (follow-up card), the panel still works",
+        "tour_done",
+        "onboarding tour bookkeeping; no show state changes",
+    ),
+    (
+        "dismiss_shader_error",
+        "closes an error toast in the window",
     ),
 ];
 
@@ -62,7 +62,11 @@ fn claimed() -> BTreeMap<&'static str, (&'static str, &'static str)> {
 #[test]
 fn the_signal_scan_sees_the_panels() {
     let signals = ui_signals();
-    assert!(signals.len() > 100, "only {} signals found; did main.rs move?", signals.len());
+    assert!(
+        signals.len() > 100,
+        "only {} signals found; did main.rs move?",
+        signals.len()
+    );
     assert!(signals.contains("save_preset"));
     for s in [
         "postprocess_to_previous",
@@ -86,12 +90,24 @@ fn every_claim_names_a_live_signal_and_a_registered_op() {
         .flat_map(|a| a.ops().into_iter().map(|o| o.name))
         .collect();
     for (signal, (addon, op)) in claimed() {
-        assert!(signals.contains(signal), "{addon} claims {signal:?}, which main.rs no longer raises");
-        assert!(ops.contains(op), "{addon} maps {signal:?} to {op:?}, which no addon registers");
+        assert!(
+            signals.contains(signal),
+            "{addon} claims {signal:?}, which main.rs no longer raises"
+        );
+        assert!(
+            ops.contains(op),
+            "{addon} maps {signal:?} to {op:?}, which no addon registers"
+        );
     }
     for (signal, _) in EXEMPT {
-        assert!(signals.contains(signal), "exemption for {signal:?}, which main.rs no longer raises");
-        assert!(!claimed().contains_key(signal), "{signal:?} is both claimed and exempt");
+        assert!(
+            signals.contains(signal),
+            "exemption for {signal:?}, which main.rs no longer raises"
+        );
+        assert!(
+            !claimed().contains_key(signal),
+            "{signal:?} is both claimed and exempt"
+        );
     }
 }
 

@@ -30,11 +30,17 @@ impl AdvanceKind {
 
     /// `manual`, `timer`, `beats` (or `beat-sync`), any case.
     pub fn parse(raw: &str) -> Result<Self, String> {
-        match raw.to_ascii_lowercase().replace(['-', ' ', '_'], "").as_str() {
+        match raw
+            .to_ascii_lowercase()
+            .replace(['-', ' ', '_'], "")
+            .as_str()
+        {
             "manual" => Ok(Self::Manual),
             "timer" => Ok(Self::Timer),
             "beats" | "beatsync" | "beat" => Ok(Self::Beats),
-            _ => Err(format!(":advance must be manual, timer or beats, got {raw:?}")),
+            _ => Err(format!(
+                ":advance must be manual, timer or beats, got {raw:?}"
+            )),
         }
     }
 
@@ -80,16 +86,28 @@ pub struct CueEdit {
 
 impl CueEdit {
     pub fn transition(t: TransitionType) -> Self {
-        Self { transition: Some(t), ..Self::default() }
+        Self {
+            transition: Some(t),
+            ..Self::default()
+        }
     }
     pub fn secs(s: f32) -> Self {
-        Self { secs: Some(s), ..Self::default() }
+        Self {
+            secs: Some(s),
+            ..Self::default()
+        }
     }
     pub fn hold(h: Option<f32>) -> Self {
-        Self { hold: Some(h), ..Self::default() }
+        Self {
+            hold: Some(h),
+            ..Self::default()
+        }
     }
     pub fn label(l: impl Into<String>) -> Self {
-        Self { label: Some(l.into()), ..Self::default() }
+        Self {
+            label: Some(l.into()),
+            ..Self::default()
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -107,14 +125,23 @@ impl CueEdit {
         let hold = match a.get("hold") {
             None => None,
             Some(Value::Null | Value::Bool(false)) => Some(None),
-            Some(_) => Some(Some(in_range(args::opt_f32(a, "hold"), HOLD_RANGE, "hold")?)),
+            Some(_) => Some(Some(in_range(
+                args::opt_f32(a, "hold"),
+                HOLD_RANGE,
+                "hold",
+            )?)),
         };
         let label = match a.get("label") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => Some(s.clone()),
             Some(_) => return Err(":label must be a string".into()),
         };
-        Ok(Self { transition, secs, hold, label })
+        Ok(Self {
+            transition,
+            secs,
+            hold,
+            label,
+        })
     }
 }
 

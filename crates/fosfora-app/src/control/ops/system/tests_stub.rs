@@ -83,7 +83,13 @@ impl Stub {
             },
             themes: vec!["Light".into(), "Gray".into(), "Black".into()],
             theme: 1,
-            web: WebStatus { enabled: false, running: false, lan: false, port: 9090, clients: 0 },
+            web: WebStatus {
+                enabled: false,
+                running: false,
+                lan: false,
+                port: 9090,
+                clients: 0,
+            },
             key_replaced: 0,
             ui_scale: 1.0,
             theme_reloads: 0,
@@ -197,7 +203,11 @@ impl RecordingPort for Stub {
 
 impl OutputPort for Stub {
     fn output_status(&self, kind: OutputKind) -> OutputStatus {
-        self.outputs.iter().find(|o| o.kind == kind).cloned().unwrap()
+        self.outputs
+            .iter()
+            .find(|o| o.kind == kind)
+            .cloned()
+            .unwrap()
     }
     fn set_output_enabled(&mut self, kind: OutputKind, on: bool) -> Result<(), String> {
         let o = self.out(kind);
@@ -208,7 +218,11 @@ impl OutputPort for Stub {
         o.running = on;
         Ok(())
     }
-    fn configure_output(&mut self, kind: OutputKind, changes: &[OutputChange]) -> Result<(), String> {
+    fn configure_output(
+        &mut self,
+        kind: OutputKind,
+        changes: &[OutputChange],
+    ) -> Result<(), String> {
         let o = self.out(kind);
         if !o.available {
             return Err(not_built(kind));
@@ -226,7 +240,9 @@ impl OutputPort for Stub {
         Ok(())
     }
     fn refresh_v4l2_devices(&mut self) -> Result<(), String> {
-        self.out(OutputKind::V4l2).devices.push("/dev/video11".into());
+        self.out(OutputKind::V4l2)
+            .devices
+            .push("/dev/video11".into());
         Ok(())
     }
     fn output_window(&self) -> (Vec<String>, Option<String>) {

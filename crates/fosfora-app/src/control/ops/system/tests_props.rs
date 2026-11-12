@@ -55,7 +55,11 @@ fn tempo_changes_always_land_in_range_and_are_idempotent() {
             rng.coin().then(|| rng.range_i(lo, hi) as f32)
         };
         let change = TempoChange {
-            preset: if rng.coin() { rng.pick(TempoPreset::ALL).copied() } else { None },
+            preset: if rng.coin() {
+                rng.pick(TempoPreset::ALL).copied()
+            } else {
+                None
+            },
             center: pick(&mut *rng, -100, 1000),
             sigma: pick(&mut *rng, -5, 10).map(|s| s / 2.0),
             auto: rng.coin().then(|| rng.coin()),
@@ -73,14 +77,25 @@ fn tempo_changes_always_land_in_range_and_are_idempotent() {
 fn tempo_bpm_accepts_exactly_the_reportable_range() {
     cases(500, 0x5EED_5103, |rng, _| {
         let bpm = rng.range_i(-50, 400) as f64 + if rng.coin() { 0.5 } else { 0.0 };
-        assert_eq!(tempo_bpm(bpm).is_ok(), (BPM_MIN..=BPM_MAX).contains(&bpm), "{bpm}");
+        assert_eq!(
+            tempo_bpm(bpm).is_ok(),
+            (BPM_MIN..=BPM_MAX).contains(&bpm),
+            "{bpm}"
+        );
     });
     assert!(tempo_bpm(f64::NAN).is_err());
 }
 
 #[test]
 fn output_changes_only_ever_carry_what_the_kind_accepts() {
-    let keys = ["name", "resolution", "alpha-from-luma", "device", "pixel-format", "noise"];
+    let keys = [
+        "name",
+        "resolution",
+        "alpha-from-luma",
+        "device",
+        "pixel-format",
+        "noise",
+    ];
     cases(500, 0x5EED_5104, |rng, _| {
         let kind = *rng.pick(OutputKind::ALL).unwrap();
         let mut a = json!({});
@@ -94,7 +109,10 @@ fn output_changes_only_ever_carry_what_the_kind_accepts() {
             };
         }
         if let Ok(changes) = output_changes(kind, &a) {
-            assert!(changes.iter().all(|c| accepts(kind, c)), "{kind:?} {a} -> {changes:?}");
+            assert!(
+                changes.iter().all(|c| accepts(kind, c)),
+                "{kind:?} {a} -> {changes:?}"
+            );
         }
     });
 }
@@ -114,11 +132,28 @@ fn toggle_or_sets_when_given_and_flips_when_not() {
 #[test]
 fn random_op_sequences_keep_the_system_consistent() {
     let ops = [
-        "system/tempo", "system/tempo-config", "system/tempo-set", "system/tempo-tap", "system/link",
-        "system/record-start", "system/record-stop", "system/record-toggle", "system/recording-config",
-        "system/output", "system/outputs", "system/settings", "system/theme", "system/web",
-        "system/overlay", "system/fullscreen", "system/binding-matrix", "system/chain-editor",
-        "system/workspace", "system/escape", "system/trigger", "system/output-window",
+        "system/tempo",
+        "system/tempo-config",
+        "system/tempo-set",
+        "system/tempo-tap",
+        "system/link",
+        "system/record-start",
+        "system/record-stop",
+        "system/record-toggle",
+        "system/recording-config",
+        "system/output",
+        "system/outputs",
+        "system/settings",
+        "system/theme",
+        "system/web",
+        "system/overlay",
+        "system/fullscreen",
+        "system/binding-matrix",
+        "system/chain-editor",
+        "system/workspace",
+        "system/escape",
+        "system/trigger",
+        "system/output-window",
     ];
     cases(200, 0x5EED_5105, |rng, _| {
         let mut s = Stub::with_link();
@@ -127,9 +162,15 @@ fn random_op_sequences_keep_the_system_consistent() {
             let args = match rng.below(5) {
                 0 => json!({}),
                 1 => json!({"index": rng.below(5), "open": rng.coin(), "visible": rng.coin()}),
-                2 => json!({"name": rng.name(), "kind": *rng.pick(&["ndi", "v4l2", "spout", "x"]).unwrap()}),
-                3 => json!({"bpm": rng.range_i(0, 400), "center": rng.range_i(0, 400), "fps": rng.below(300)}),
-                _ => json!({"action": rng.name(), "enabled": rng.coin(), "mode": "lead", "quantum": rng.below(20)}),
+                2 => {
+                    json!({"name": rng.name(), "kind": *rng.pick(&["ndi", "v4l2", "spout", "x"]).unwrap()})
+                }
+                3 => {
+                    json!({"bpm": rng.range_i(0, 400), "center": rng.range_i(0, 400), "fps": rng.below(300)})
+                }
+                _ => {
+                    json!({"action": rng.name(), "enabled": rng.coin(), "mode": "lead", "quantum": rng.below(20)})
+                }
             };
             let result = s.call(op, args);
             // Tempo prior stays inside what the estimator can report.

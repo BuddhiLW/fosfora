@@ -181,7 +181,11 @@ impl App {
 
     /// Load an obstacle video onto `layer`: the file at `path`, or the native
     /// dialog for `None`. Decoding runs on the source loader's thread.
-    pub fn load_obstacle_video(&mut self, layer: usize, path: Option<PathBuf>) -> Result<(), String> {
+    pub fn load_obstacle_video(
+        &mut self,
+        layer: usize,
+        path: Option<PathBuf>,
+    ) -> Result<(), String> {
         particles(&self.layer_stack, layer)?;
         self.preset_store.mark_dirty();
         let request = SourceRequest {

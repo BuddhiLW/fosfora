@@ -61,7 +61,8 @@ impl ControlAddon<Counter> for Override {
 fn counter() -> Counter {
     let mut c = Counter::default();
     c.registry.register(&Math);
-    c.registry.register(&ops::core::Addon as &dyn ControlAddon<Counter>);
+    c.registry
+        .register(&ops::core::Addon as &dyn ControlAddon<Counter>);
     c
 }
 
@@ -80,9 +81,18 @@ fn the_catalog_lists_every_op_with_its_addon_and_core_reads_it() {
     let mut c = counter();
     let catalog = run(&mut c, "ops", &json!({})).unwrap();
     let rows = catalog.as_array().unwrap();
-    assert!(rows.iter().any(|r| r["name"] == "math/add" && r["addon"] == "math"));
-    assert!(rows.iter().any(|r| r["name"] == "ops" && r["addon"] == "core"));
-    assert_eq!(run(&mut c, "addons", &json!({})), Ok(json!(["math", "core"])));
+    assert!(
+        rows.iter()
+            .any(|r| r["name"] == "math/add" && r["addon"] == "math")
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r["name"] == "ops" && r["addon"] == "core")
+    );
+    assert_eq!(
+        run(&mut c, "addons", &json!({})),
+        Ok(json!(["math", "core"]))
+    );
 }
 
 #[test]
@@ -148,7 +158,10 @@ fn random_call_sequences_sum_exactly_like_the_reference() {
                 0 => {
                     let by = rng.range_i(-9, 9) as i64;
                     model += by;
-                    assert_eq!(run(&mut c, "math/add", &json!({"by": by})), Ok(json!(model)));
+                    assert_eq!(
+                        run(&mut c, "math/add", &json!({"by": by})),
+                        Ok(json!(model))
+                    );
                 }
                 1 => assert_eq!(run(&mut c, "math/get", &json!({})), Ok(json!(model))),
                 _ => assert!(run(&mut c, &rng.name(), &json!({})).is_err() || c.n == model),

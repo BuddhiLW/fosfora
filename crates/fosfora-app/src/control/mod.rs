@@ -50,7 +50,12 @@ impl<C> Clone for OpSpec<C> {
 impl<C> Copy for OpSpec<C> {}
 
 impl<C> OpSpec<C> {
-    pub const fn new(name: &'static str, args: &'static str, doc: &'static str, run: OpFn<C>) -> Self {
+    pub const fn new(
+        name: &'static str,
+        args: &'static str,
+        doc: &'static str,
+        run: OpFn<C>,
+    ) -> Self {
         Self {
             name,
             args,
@@ -145,7 +150,6 @@ impl<C> Registry<C> {
                 .collect(),
         )
     }
-
 }
 
 /// A context that carries its own registry, so ops (`ops`, `addons`) can
@@ -242,6 +246,6 @@ impl App {
 #[cfg(test)]
 mod coverage;
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 pub(crate) mod testkit;
+#[cfg(test)]
+mod tests;

@@ -957,13 +957,21 @@ fn osc_config_reads_changes_and_refuses_bad_ports() {
     let r = s
         .call("bindings/osc-config", json!({"port": 9100, "lan": true}))
         .unwrap();
-    assert_eq!((r["port"].as_u64(), r["lan"].as_bool()), (Some(9100), Some(true)));
-    for bad in [json!({"port": 53}), json!({"port": 70000}), json!({"port": "x"})] {
+    assert_eq!(
+        (r["port"].as_u64(), r["lan"].as_bool()),
+        (Some(9100), Some(true))
+    );
+    for bad in [
+        json!({"port": 53}),
+        json!({"port": 70000}),
+        json!({"port": "x"}),
+    ] {
         assert!(s.call("bindings/osc-config", bad.clone()).is_err(), "{bad}");
     }
     assert_eq!(s.net().rx_port, 9100, "refused calls change nothing");
     assert_eq!(
-        s.call("bindings/osc-config", json!({"enabled": false})).unwrap()["enabled"],
+        s.call("bindings/osc-config", json!({"enabled": false}))
+            .unwrap()["enabled"],
         false
     );
     assert!(!s.enabled[1]);
@@ -973,14 +981,20 @@ fn osc_config_reads_changes_and_refuses_bad_ports() {
 fn osc_send_reads_changes_and_refuses_bad_values() {
     let mut s = Stub::new();
     let r = s.call("bindings/osc-send", json!({})).unwrap();
-    assert_eq!(r, json!({"enabled": false, "host": "127.0.0.1", "port": 9001, "rate": 30, "prefix": "fosfora"}));
+    assert_eq!(
+        r,
+        json!({"enabled": false, "host": "127.0.0.1", "port": 9001, "rate": 30, "prefix": "fosfora"})
+    );
     let r = s
         .call(
             "bindings/osc-send",
             json!({"enabled": true, "host": "10.0.0.5", "rate": 60, "prefix": "/Phosphor/"}),
         )
         .unwrap();
-    assert_eq!(r, json!({"enabled": true, "host": "10.0.0.5", "port": 9001, "rate": 60, "prefix": "phosphor"}));
+    assert_eq!(
+        r,
+        json!({"enabled": true, "host": "10.0.0.5", "port": 9001, "rate": 60, "prefix": "phosphor"})
+    );
     for bad in [
         json!({"host": ""}),
         json!({"host": "a b"}),

@@ -30,10 +30,17 @@ fn merge_at(base: &Value, patch: &Value, at: &str) -> Result<Value, String> {
         (Value::Object(b), Value::Object(p)) => {
             let mut out: Map<String, Value> = b.clone();
             for (k, pv) in p {
-                let path = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
-                let bv = b
-                    .get(k)
-                    .ok_or_else(|| format!("unknown param {path:?}; known: {:?}", b.keys().collect::<Vec<_>>()))?;
+                let path = if at.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{at}.{k}")
+                };
+                let bv = b.get(k).ok_or_else(|| {
+                    format!(
+                        "unknown param {path:?}; known: {:?}",
+                        b.keys().collect::<Vec<_>>()
+                    )
+                })?;
                 out.insert(k.clone(), merge_at(bv, pv, &path)?);
             }
             Ok(Value::Object(out))

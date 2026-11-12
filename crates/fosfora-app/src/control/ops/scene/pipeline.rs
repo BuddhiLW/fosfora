@@ -17,7 +17,10 @@ pub fn plan_advance(
 ) -> Result<Option<AdvanceMode>, String> {
     if let Some(b) = beats {
         if !(BEATS_RANGE.0..=BEATS_RANGE.1).contains(&b) {
-            return Err(format!(":beats must be in {}..{}", BEATS_RANGE.0, BEATS_RANGE.1));
+            return Err(format!(
+                ":beats must be in {}..{}",
+                BEATS_RANGE.0, BEATS_RANGE.1
+            ));
         }
     }
     let held = match current {
@@ -123,6 +126,12 @@ pub fn state_json(scene: Value, t: &TimelineView) -> Value {
     v["scene"] = scene;
     v["loop"] = json!(t.loop_mode);
     v["advance"] = advance_json(t.advance);
-    v["cues"] = Value::Array(t.cues.iter().enumerate().map(|(i, c)| cue_json(i, c)).collect());
+    v["cues"] = Value::Array(
+        t.cues
+            .iter()
+            .enumerate()
+            .map(|(i, c)| cue_json(i, c))
+            .collect(),
+    );
     v
 }

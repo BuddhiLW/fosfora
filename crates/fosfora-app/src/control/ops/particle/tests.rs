@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use super::Addon;
 use super::model::{
     MediaKind, MorphEdit, MorphView, ObstacleFollowUp, ObstacleState, SimEdit, SimState,
     SourceLoad, SourceState, SplatState, VideoEdit, VideoState,
@@ -15,7 +16,6 @@ use super::model::{
 use super::port::{
     MorphPort, ObstaclePort, ParticleLayers, ParticleSimPort, ParticleSourcePort, SourceLoading,
 };
-use super::Addon;
 use crate::control::{ControlAddon, OpHost, Registry, run};
 use crate::gpu::helix::HelixParams;
 use crate::gpu::lattice::LatticeParams;
@@ -65,9 +65,17 @@ fn full_layer() -> Layer {
             trail_length: 0,
             max_particles: 1000,
         }),
-        source: SourceState { kind: "none", ..SourceState::default() },
+        source: SourceState {
+            kind: "none",
+            ..SourceState::default()
+        },
         obstacle: Some(obstacle()),
-        morph: Some(MorphView { progress: 1.0, hold: 1.5, auto_cycle: 1, ..MorphView::default() }),
+        morph: Some(MorphView {
+            progress: 1.0,
+            hold: 1.5,
+            auto_cycle: 1,
+            ..MorphView::default()
+        }),
         lattice: Some(LatticeParams::default()),
         helix: Some(HelixParams::default()),
         splat: true,
@@ -161,7 +169,12 @@ impl ParticleSimPort for Stub {
     fn lattice(&self, layer: usize) -> Option<LatticeParams> {
         self.layers.get(layer)?.lattice
     }
-    fn set_lattice(&mut self, layer: usize, params: LatticeParams, reseed: bool) -> Result<(), String> {
+    fn set_lattice(
+        &mut self,
+        layer: usize,
+        params: LatticeParams,
+        reseed: bool,
+    ) -> Result<(), String> {
         self.layer(layer)?.lattice = Some(params);
         self.did.push(format!("lattice reseed={reseed}"));
         Ok(())
@@ -190,15 +203,27 @@ impl ParticleSourcePort for Stub {
         let l = self.layer(layer)?;
         let what = match load {
             SourceLoad::Builtin(name) => {
-                l.source = SourceState { kind: "image", path: Some(name.clone()), ..SourceState::default() };
+                l.source = SourceState {
+                    kind: "image",
+                    path: Some(name.clone()),
+                    ..SourceState::default()
+                };
                 format!("builtin {name}")
             }
-            SourceLoad::File { kind, path: Some(p) } => {
+            SourceLoad::File {
+                kind,
+                path: Some(p),
+            } => {
                 l.source = SourceState {
                     kind: kind.name(),
                     path: Some(p.display().to_string()),
-                    video: (kind == MediaKind::Video)
-                        .then_some(VideoState { playing: true, looping: true, speed: 1.0, frame: 0, frames: 10 }),
+                    video: (kind == MediaKind::Video).then_some(VideoState {
+                        playing: true,
+                        looping: true,
+                        speed: 1.0,
+                        frame: 0,
+                        frames: 10,
+                    }),
                     ..SourceState::default()
                 };
                 format!("{} {}", kind.name(), p.display())
@@ -215,12 +240,20 @@ impl ParticleSourcePort for Stub {
         if self.cams.is_empty() {
             return Err("no camera".into());
         }
-        self.layer(layer)?.source = SourceState { kind: "webcam", ..SourceState::default() };
+        self.layer(layer)?.source = SourceState {
+            kind: "webcam",
+            ..SourceState::default()
+        };
         self.did.push(format!("webcam {device:?}"));
         Ok(())
     }
     fn edit_video(&mut self, layer: usize, edit: &VideoEdit) -> Result<(), String> {
-        let v = self.layer(layer)?.source.video.as_mut().ok_or("not a video")?;
+        let v = self
+            .layer(layer)?
+            .source
+            .video
+            .as_mut()
+            .ok_or("not a video")?;
         v.playing = edit.playing.unwrap_or(v.playing);
         v.looping = edit.looping.unwrap_or(v.looping);
         v.speed = edit.speed.unwrap_or(v.speed);
@@ -236,7 +269,11 @@ impl ParticleSourcePort for Stub {
     }
     fn splat_state(&self, layer: usize) -> Option<SplatState> {
         let l = self.layers.get(layer)?;
-        l.sim.map(|_| SplatState { is_splat: l.splat, downloading: self.downloading, ..SplatState::default() })
+        l.sim.map(|_| SplatState {
+            is_splat: l.splat,
+            downloading: self.downloading,
+            ..SplatState::default()
+        })
     }
     fn splat_load(&mut self, layer: usize, path: Option<PathBuf>) -> Result<(), String> {
         if !self.layer(layer)?.splat {
@@ -270,7 +307,11 @@ impl ObstaclePort for Stub {
     fn obstacle_state(&self, layer: usize) -> Option<ObstacleState> {
         self.layers.get(layer)?.obstacle.clone()
     }
-    fn obstacle_command(&mut self, layer: usize, cmd: ObstacleCommand) -> Result<ObstacleFollowUp, String> {
+    fn obstacle_command(
+        &mut self,
+        layer: usize,
+        cmd: ObstacleCommand,
+    ) -> Result<ObstacleFollowUp, String> {
         let o = self.layer(layer)?.obstacle.as_mut().ok_or("no obstacle")?;
         match cmd {
             ObstacleCommand::SetEnabled(v) => o.enabled = v,
@@ -297,7 +338,12 @@ impl ObstaclePort for Stub {
         }
         Ok(ObstacleFollowUp::Done)
     }
-    fn load_obstacle(&mut self, layer: usize, kind: MediaKind, path: Option<PathBuf>) -> Result<(), String> {
+    fn load_obstacle(
+        &mut self,
+        layer: usize,
+        kind: MediaKind,
+        path: Option<PathBuf>,
+    ) -> Result<(), String> {
         let o = self.layer(layer)?.obstacle.as_mut().ok_or("no obstacle")?;
         match (kind, path) {
             (MediaKind::Video, None) => self.did.push("obstacle video dialog".into()),
@@ -320,8 +366,17 @@ impl MorphPort for Stub {
     fn morph_state(&self, layer: usize) -> Option<MorphView> {
         self.layers.get(layer)?.morph.clone()
     }
-    fn apply_morph(&mut self, layer: usize, edit: &MorphEdit, slot: Option<u32>) -> Result<(), String> {
-        let m = self.layer(layer)?.morph.as_mut().ok_or("no morph targets")?;
+    fn apply_morph(
+        &mut self,
+        layer: usize,
+        edit: &MorphEdit,
+        slot: Option<u32>,
+    ) -> Result<(), String> {
+        let m = self
+            .layer(layer)?
+            .morph
+            .as_mut()
+            .ok_or("no morph targets")?;
         if let Some(t) = edit.trigger.filter(|&t| t < m.target_count) {
             m.source = m.dest;
             m.dest = t;
@@ -331,7 +386,11 @@ impl MorphPort for Stub {
         m.hold = edit.hold.unwrap_or(m.hold);
         m.source = edit.set_source.unwrap_or(m.source);
         m.progress = edit.blend.unwrap_or(m.progress);
-        if let Some(c) = edit.clear_slot.map(|c| c as usize).filter(|&c| c < m.slots.len()) {
+        if let Some(c) = edit
+            .clear_slot
+            .map(|c| c as usize)
+            .filter(|&c| c < m.slots.len())
+        {
             m.slots.remove(c);
         }
         let label = edit
@@ -350,7 +409,11 @@ impl MorphPort for Stub {
         if let Some((kind, path)) = &edit.load {
             self.did.push(format!("morph {} {path:?}", kind.name()));
         }
-        let m = self.layer(layer)?.morph.as_mut().ok_or("no morph targets")?;
+        let m = self
+            .layer(layer)?
+            .morph
+            .as_mut()
+            .ok_or("no morph targets")?;
         m.target_count = u32::try_from(m.slots.len()).unwrap_or(4);
         Ok(())
     }
