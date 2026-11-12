@@ -1,5 +1,10 @@
 //! `ops`, `addons`: what the registry holds. Generic over any [`OpHost`].
 
+#![allow(
+    clippy::unnecessary_wraps,
+    reason = "every op body has the OpFn signature, failing or not"
+)]
+
 use serde_json::{Value, json};
 
 use crate::control::{ControlAddon, OpHost, OpResult, OpSpec};

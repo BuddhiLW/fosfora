@@ -59,6 +59,8 @@ impl<C: ParticlePorts + 'static> ControlAddon<C> for Addon {
             OpSpec::new("particle/webcams", "{}", "The connected cameras.", src::webcams::<C>),
             OpSpec::new("particle/webcam", "{:device str?, :layer?}", "A camera as the source (the default one without :device).", src::webcam::<C>),
             OpSpec::new("particle/video", "{:layer? :playing :looping :speed :seek}", "Read, or change, a video source's transport.", src::video::<C>),
+            OpSpec::new("particle/loading", "{}", "Particle source, obstacle and morph files still loading: index, name, frames, secs.", src::loading::<C>),
+            OpSpec::new("particle/cancel-load", "{:load int|str?}", "Stop a file still loading (the only one without :load).", src::cancel_load::<C>),
             OpSpec::new("particle/splat", L, "The layer's splat scene state.", src::splat::<C>),
             OpSpec::new("particle/splat-load", "{:path str?, :layer?}", "Load a splat scene (no :path opens the dialog).", src::splat_load::<C>),
             OpSpec::new("particle/splat-demo", "{}", "Download the demo splat scene onto the active splat layer.", src::splat_demo::<C>),
@@ -120,6 +122,7 @@ impl<C: ParticlePorts + 'static> ControlAddon<C> for Addon {
             ("morph_load_image", "particle/morph-load"),
             ("morph_load_video", "particle/morph-load"),
             ("morph_load_model", "particle/morph-load"),
+            ("cancel_source_load", "particle/cancel-load"),
         ]
     }
 

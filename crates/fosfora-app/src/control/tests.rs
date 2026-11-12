@@ -1,5 +1,10 @@
 //! Registry and queue: unit + property, against a context with no app.
 
+#![allow(
+    clippy::unnecessary_wraps,
+    reason = "every op body has the OpFn signature, failing or not"
+)]
+
 use std::time::Duration;
 
 use serde_json::{Value, json};

@@ -12,6 +12,7 @@
 )]
 
 pub mod actions;
+pub mod loading;
 pub mod port;
 #[cfg(test)]
 mod tests;
@@ -19,7 +20,7 @@ mod tests;
 use serde_json::{Map, Value, json};
 
 pub use self::port::{
-    EffectPort, EffectView, LayerEdit, LayerKind, LayerPorts, LayerView, MediaPort, ParamPort,
+    EffectPort, EffectView, LayerEdit, LayerKind, LayerPorts, LayerView, MediaLoadView, MediaPort, ParamPort,
     PostFxPort, StackPort, TransportEdit, TransportView, WebcamList,
 };
 use crate::control::{CljrsNs, ControlAddon, OpResult, OpSpec, args};
@@ -43,7 +44,7 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
             // Stack
             OpSpec::new("layer/list", "{}", "Every layer, top first: index, name, kind, effect, blend, opacity...", list::<C>),
             OpSpec::new("layer/get", LAYER, "One layer (default: the active one).", get::<C>),
-            OpSpec::new("layer/add", "{}", "Add an empty layer on top and select it.", add::<C>),
+            OpSpec::new("layer/add", "{:at int?}", "Add an empty layer and select it: at position :at (0 = top), else at the bottom.", add::<C>),
             OpSpec::new("layer/remove", LAYER, "Remove a layer (never the last); returns what was removed.", remove::<C>),
             OpSpec::new("layer/clear", "{}", "Clear the stack back to the launch layers.", clear::<C>),
             OpSpec::new("layer/move", "{:index int | :name str, :to int}", "Move a layer to position :to.", move_::<C>),
@@ -79,6 +80,7 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
             OpSpec::new("layer/delete-effect", "{:effect int|str}", "Delete a user effect's files.", delete_effect::<C>),
             OpSpec::new("layer/edit-shader", LAYER, "Open a layer's shader in the editor.", edit_shader::<C>),
             OpSpec::new("layer/save-shader", "{}", "Save the shader editor's dirty tabs.", save_shader::<C>),
+            OpSpec::new("layer/shader-source", LAYER, "The WGSL a layer's effect runs: :source (first pass) and :passes.", loading::shader_source::<C>),
             // Params
             OpSpec::new("layer/params", LAYER, "A layer's params: type, value, range, default, normalized.", params::<C>),
             OpSpec::new("layer/param", "{:param str, :index|:name layer?}", "One param of a layer.", param::<C>),
@@ -91,6 +93,8 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
             OpSpec::new("layer/reset-param", "{:param str?, :index|:name layer?}", "Reset one param (or all) to the effect's defaults.", reset_param::<C>),
             // Media
             OpSpec::new("layer/add-media", "{:path str}", "Decode an image or video into a new layer (appears when ready).", add_media::<C>),
+            OpSpec::new("layer/loading", "{}", "Media files still decoding into new layers: index, file, frames done/total, secs.", loading::loading::<C>),
+            OpSpec::new("layer/cancel-media", "{:load int|str?}", "Stop decoding a pending media file (the only one without :load).", loading::cancel_media::<C>),
             OpSpec::new("layer/media", LAYER, "A media layer's transport: playing, loop, speed, direction, position.", media::<C>),
             OpSpec::new(
                 "layer/transport",
@@ -149,6 +153,9 @@ impl<C: LayerPorts + 'static> ControlAddon<C> for Addon {
             ("set_ffmpeg_webcam", "layer/webcam-backend"),
             ("set_rtmp_streams", "layer/streams"),
             ("adopt_layer_postprocess", "layer/adopt-postfx"),
+            ("postprocess_to_previous", "layer/postfx-previous"),
+            ("postprocess_to_defaults", "layer/postfx-defaults"),
+            ("cancel_media_load", "layer/cancel-media"),
         ]
     }
 
@@ -421,6 +428,7 @@ pub fn filter_effects(
 
 fn type_name(def: &ParamDef) -> &'static str {
     match def {
+        ParamDef::Int { .. } => "int",
         ParamDef::Float { .. } => "float",
         ParamDef::Color { .. } => "color",
         ParamDef::Bool { .. } => "bool",
@@ -470,6 +478,10 @@ pub fn param_json(def: &ParamDef, value: Option<&ParamValue>) -> Value {
     });
     match def {
         ParamDef::Float { min, max, .. } => {
+            out["min"] = json!(min);
+            out["max"] = json!(max);
+        }
+        ParamDef::Int { min, max, .. } => {
             out["min"] = json!(min);
             out["max"] = json!(max);
         }
@@ -523,6 +535,11 @@ fn components<const N: usize>(v: &Value, what: &str) -> Result<[f32; N], String>
 pub fn promote_param(def: &ParamDef, raw: &Value, normalized: bool) -> Result<ParamValue, String> {
     let what = def.name();
     match def {
+        #[allow(clippy::cast_precision_loss)]
+        ParamDef::Int { min, max, .. } => {
+            let x = ranged(num_in(raw, what)?, *min as f32, *max as f32, normalized, what)?;
+            Ok(ParamValue::Float(x.round()))
+        }
         ParamDef::Float { min, max, .. } => {
             Ok(ParamValue::Float(ranged(num_in(raw, what)?, *min, *max, normalized, what)?))
         }
@@ -614,8 +631,18 @@ fn get<P: StackPort>(port: &mut P, a: &Value) -> OpResult {
     Ok(view_at(port, i))
 }
 
-fn add<P: StackPort>(port: &mut P, _: &Value) -> OpResult {
-    let i = port.add_layer()?;
+fn add<P: StackPort>(port: &mut P, a: &Value) -> OpResult {
+    let i = match a.get("at") {
+        None | Some(Value::Null) => port.add_layer()?,
+        Some(_) => {
+            let at = args::opt_usize(a, "at").ok_or(":at must be a non-negative integer")?;
+            let len = port.layers().len();
+            if at > len {
+                return Err(format!(":at {at} out of range (0..={len})"));
+            }
+            port.insert_layer(at)?
+        }
+    };
     Ok(view_at(port, i))
 }
 

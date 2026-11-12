@@ -27,7 +27,10 @@
 
 (defn ls [] (f/op :layer/list))
 (defn get-layer ([] (get-layer nil)) ([l] (f/op :layer/get (target l))))
-(defn add! [] (f/op :layer/add))
+(defn add!
+  "Add an empty layer and select it; :at n puts it at position n (0 = top)."
+  [& {:keys [at]}]
+  (f/op :layer/add (if at {:at at} {})))
 (defn remove! [l] (f/op :layer/remove (target l)))
 (defn clear! [] (f/op :layer/clear))
 (defn move! [l & {:keys [to]}] (f/op :layer/move (assoc (target l) :to to)))
@@ -82,6 +85,10 @@
 (defn delete-effect! [e] (f/op :layer/delete-effect {:effect (nm e)}))
 (defn edit-shader! ([] (edit-shader! nil)) ([l] (f/op :layer/edit-shader (target l))))
 (defn save-shader! [] (f/op :layer/save-shader))
+(defn shader-source
+  "The WGSL layer `l` runs (its first pass); (:passes (f/op :layer/shader-source)) has them all."
+  ([] (shader-source nil))
+  ([l] (:source (f/op :layer/shader-source (target l)))))
 
 ;; Params
 
@@ -102,6 +109,11 @@
 ;; Media
 
 (defn media! [path] (f/op :layer/add-media {:path path}))
+(defn loading [] (f/op :layer/loading))
+(defn cancel-media!
+  "Stop a media file still decoding: by index or file name; none when only one loads."
+  ([] (f/op :layer/cancel-media))
+  ([load] (f/op :layer/cancel-media {:load load})))
 (defn transport ([] (transport nil)) ([l] (f/op :layer/media (target l))))
 (defn transport! [l & {:as opts}] (f/op :layer/transport (merge (target l) opts)))
 (defn play! [l] (transport! l :playing true))

@@ -27,6 +27,22 @@ impl App {
         Ok(self.layer_stack.layers.len() - 1)
     }
 
+    /// Add an empty layer at position `at` and select it, as a catalog
+    /// effect dropped between layers does ([`App::place_effect`]); `at`.
+    pub fn layer_insert(&mut self, at: usize) -> Result<usize, String> {
+        let n = self.layer_stack.layers.len();
+        if at > n {
+            return Err(format!(":at {at} out of range (0..={n})"));
+        }
+        self.layer_add()?;
+        // add_layer appends at the bottom and selects it; the move carries
+        // the selection and the bindings along.
+        self.move_layer(n, at);
+        self.layer_stack.active_layer = at;
+        self.sync_active_layer();
+        Ok(at)
+    }
+
     /// Remove layer `index`, carrying its bindings; the last layer stays.
     pub fn layer_remove(&mut self, index: usize) -> Result<(), String> {
         let len = self.layer_stack.layers.len();

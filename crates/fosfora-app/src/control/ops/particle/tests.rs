@@ -12,7 +12,9 @@ use super::model::{
     MediaKind, MorphEdit, MorphView, ObstacleFollowUp, ObstacleState, SimEdit, SimState,
     SourceLoad, SourceState, SplatState, VideoEdit, VideoState,
 };
-use super::port::{MorphPort, ObstaclePort, ParticleLayers, ParticleSimPort, ParticleSourcePort};
+use super::port::{
+    MorphPort, ObstaclePort, ParticleLayers, ParticleSimPort, ParticleSourcePort, SourceLoading,
+};
 use super::Addon;
 use crate::control::{ControlAddon, OpHost, Registry, run};
 use crate::gpu::helix::HelixParams;
@@ -81,6 +83,8 @@ struct Stub {
     cams: Vec<(u32, String)>,
     loading: bool,
     downloading: bool,
+    /// Source loads in flight.
+    loads: Vec<SourceLoading>,
     /// What the stub was asked to do, in order.
     did: Vec<String>,
     registry: Registry<Stub>,
@@ -98,6 +102,7 @@ impl Stub {
             cams: vec![(0, "Integrated Camera".into()), (2, "USB Cam".into())],
             loading: false,
             downloading: false,
+            loads: Vec::new(),
             did: Vec::new(),
             registry: Registry::default(),
         };
@@ -243,6 +248,19 @@ impl ParticleSourcePort for Stub {
     fn splat_download_demo(&mut self) -> Result<(), String> {
         if std::mem::replace(&mut self.downloading, true) {
             return Err("already downloading".into());
+        }
+        Ok(())
+    }
+    fn source_loads(&self) -> Vec<SourceLoading> {
+        self.loads.clone()
+    }
+    fn cancel_source_load(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.loads.len() {
+            return Err("out of range".into());
+        }
+        self.loads.remove(index);
+        for (i, l) in self.loads.iter_mut().enumerate() {
+            l.index = i;
         }
         Ok(())
     }

@@ -136,6 +136,37 @@ pub fn splat_load<P: ParticleSourcePort>(port: &mut P, a: &Value) -> OpResult {
     Ok(json!({"layer": layer, "loading": shown}))
 }
 
+fn load_json(l: &super::port::SourceLoading) -> Value {
+    json!({"index": l.index, "name": l.name, "done": l.done, "total": l.total, "secs": l.secs})
+}
+
+/// `particle/loading`: every particle source, obstacle or morph file still
+/// loading.
+#[allow(clippy::unnecessary_wraps)] // an OpFn
+pub fn loading<P: ParticleSourcePort>(port: &mut P, _: &Value) -> OpResult {
+    Ok(Value::Array(port.source_loads().iter().map(load_json).collect()))
+}
+
+/// `particle/cancel-load`: stop one load, picked by its index or by (a unique
+/// part of) its file name; the only one without `:load`. The load stopped.
+pub fn cancel_load<P: ParticleSourcePort>(port: &mut P, a: &Value) -> OpResult {
+    let loads = port.source_loads();
+    let names: Vec<&str> = loads.iter().map(|l| l.name.as_str()).collect();
+    let i = match a.get("load") {
+        _ if loads.is_empty() => return Err("no particle source is loading".into()),
+        None | Some(Value::Null) if loads.len() == 1 => 0,
+        None | Some(Value::Null) => {
+            return Err(format!("{} loads are running; give :load (an index or a file name)", loads.len()));
+        }
+        Some(v @ Value::Number(_)) => args::pick(&json!({"index": v}), &names, "source load")?,
+        Some(v @ Value::String(_)) => args::pick(&json!({"name": v}), &names, "source load")?,
+        Some(v) => return Err(format!(":load must be an index or a file name, got {v}")),
+    };
+    let gone = load_json(&loads[i]);
+    port.cancel_source_load(i)?;
+    Ok(gone)
+}
+
 /// `particle/splat-demo`: download the demo scene onto the active splat layer.
 pub fn splat_demo<P: ParticleSourcePort>(port: &mut P, _: &Value) -> OpResult {
     port.splat_download_demo()?;

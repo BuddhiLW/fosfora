@@ -45,7 +45,9 @@ fn encode(v: &B, out: &mut Vec<u8>) {
         }
         B::List(items) => {
             out.push(b'l');
-            items.iter().for_each(|i| encode(i, out));
+            for i in items {
+                encode(i, out);
+            }
             out.push(b'e');
         }
         B::Dict(kv) => {
@@ -334,4 +336,62 @@ fn system_reads_and_a_reversible_view_toggle_over_nrepl() {
     assert_eq!(repl.eval("(:chain-editor (sys/view))").unwrap(), was);
     let e = repl.eval("(sys/trigger! :explode)").unwrap_err();
     assert!(e.contains("next-effect"), "{e}");
+}
+
+#[test]
+fn layer_insert_at_shader_source_and_media_loading_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Reads first: the shader the active layer runs, and the decode queue.
+    let src = repl.eval("(string? (layer/shader-source))");
+    if let Ok(v) = &src {
+        assert_eq!(v, "true");
+    } else {
+        assert!(src.unwrap_err().contains("not an effect layer"));
+    }
+    assert_eq!(repl.eval("(vector? (layer/loading))").unwrap(), "true");
+    let e = repl
+        .eval("(layer/cancel-media! \"no-such-file-in-the-queue.mp4\")")
+        .unwrap_err();
+    assert!(
+        e.contains("no media is loading") || e.contains("matches"),
+        "{e}"
+    );
+    // A layer inserted at the top lands there, selected; then it goes away.
+    let n: usize = repl.eval("(count (layer/ls))").unwrap().parse().unwrap();
+    let e = repl
+        .eval(&format!("(layer/add! :at {})", n + 1))
+        .unwrap_err();
+    assert!(e.contains("out of range"), "{e}");
+    let active = repl.eval("(:index (layer/get-layer))").unwrap();
+    let Ok(at) = repl.eval("(:index (layer/add! :at 0))") else {
+        return; // a full stack refuses; nothing changed
+    };
+    assert_eq!(at, "0");
+    assert_eq!(repl.eval("(:active (layer/get-layer 0))").unwrap(), "true");
+    repl.eval("(layer/remove! 0)").unwrap();
+    assert_eq!(repl.eval("(count (layer/ls))").unwrap(), n.to_string());
+    repl.eval(&format!("(layer/select! {active})")).unwrap();
+}
+
+#[test]
+fn particle_loading_and_cancel_load_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    assert_eq!(repl.eval("(vector? (particle/loading))").unwrap(), "true");
+    let e = repl
+        .eval("(particle/cancel-load! \"no-such-file-in-the-queue.png\")")
+        .unwrap_err();
+    assert!(
+        e.contains("no particle source is loading") || e.contains("matches"),
+        "{e}"
+    );
+    let e = repl
+        .eval("(f/op :particle/cancel-load {:load true})")
+        .unwrap_err();
+    assert!(!e.is_empty());
 }

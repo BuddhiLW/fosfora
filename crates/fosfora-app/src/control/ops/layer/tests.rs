@@ -9,6 +9,8 @@ use crate::control::{ControlAddon, OpHost, Registry, run};
 use crate::gpu::layer::{adjusted_active_after_move, adjusted_active_after_remove};
 use crate::settings::RtmpStream;
 
+mod loading;
+
 const MAX: usize = crate::bindings::catalog::MAX_LAYERS;
 
 #[derive(Clone)]
@@ -27,6 +29,7 @@ struct Stub {
     pp: PostProcessDef,
     pp_prev: Option<PostProcessDef>,
     editor: Option<String>,
+    loads: Vec<MediaLoadView>,
     registry: Registry<Stub>,
 }
 
@@ -97,6 +100,7 @@ impl Stub {
             pp: PostProcessDef::default(),
             pp_prev: None,
             editor: None,
+            loads: Vec::new(),
             registry: Registry::default(),
         };
         s.effects[3].hidden = false;
@@ -142,6 +146,13 @@ impl StackPort for Stub {
         self.layers.push(effect_layer(&format!("Layer {}", self.layers.len() + 1), None));
         self.active = self.layers.len() - 1;
         Ok(self.active)
+    }
+    fn insert_layer(&mut self, at: usize) -> Result<usize, String> {
+        let n = self.layers.len();
+        self.add_layer()?;
+        self.move_layer(n, at);
+        self.active = at;
+        Ok(at)
     }
     fn remove_layer(&mut self, index: usize) -> Result<(), String> {
         if self.layers.len() <= 1 || index >= self.layers.len() {
@@ -225,6 +236,13 @@ impl EffectPort for Stub {
     fn save_shader_editor(&mut self) -> Result<Vec<String>, String> {
         Ok(self.editor.iter().cloned().collect())
     }
+    fn shader_sources(&self, layer: usize) -> Option<Vec<String>> {
+        let l = self.layers.get(layer)?;
+        if l.view.kind != LayerKind::Effect {
+            return None;
+        }
+        Some(vec![format!("// {}\n@fragment fn fs_main() {{}}", l.view.effect.as_deref().unwrap_or("empty"))])
+    }
 }
 
 impl ParamPort for Stub {
@@ -259,6 +277,16 @@ impl MediaPort for Stub {
         let n = self.layers.len() + 1;
         self.layers.push(media_layer(&format!("Layer {n}"), path, false));
         self.active = n - 1;
+        Ok(())
+    }
+    fn media_loads(&self) -> Vec<MediaLoadView> {
+        self.loads.clone()
+    }
+    fn cancel_media(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.loads.len() {
+            return Err("out of range".into());
+        }
+        self.loads.remove(index);
         Ok(())
     }
     fn transport(&self, layer: usize) -> Option<TransportView> {

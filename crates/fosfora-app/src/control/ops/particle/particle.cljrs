@@ -82,6 +82,13 @@
 (defn video-speed! [x] (f/op :particle/video {:speed (double x)}))
 (defn seek! [secs] (f/op :particle/video {:seek (double secs)}))
 
+(defn loading [] (f/op :particle/loading))
+(defn cancel-load!
+  "Stop a source, obstacle or morph file still loading: by index or file
+  name; none when only one loads."
+  ([] (f/op :particle/cancel-load))
+  ([load] (f/op :particle/cancel-load {:load load})))
+
 (defn splat [] (f/op :particle/splat))
 (defn splat! ([] (splat! nil)) ([path] (f/op :particle/splat-load (with-path path))))
 (defn splat-demo! [] (f/op :particle/splat-demo))

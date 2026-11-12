@@ -61,6 +61,27 @@ unique part of it, in any case.
 (sys/record!)
 ```
 
+Some ops do things the namespaces above only touch in passing:
+
+| op | helper | what it does |
+|---|---|---|
+| `:layer/add {:at n}` | `(layer/add! :at 0)` | add an empty layer at position `n` (0 is the top) and select it, as dropping between layers does; without `:at` it goes at the bottom |
+| `:layer/shader-source` | `(layer/shader-source 1)` | the WGSL a layer's effect runs: `:source` (first pass) and `:passes` |
+| `:layer/loading` | `(layer/loading)` | media files still decoding into new layers: index, file, frames done and total |
+| `:layer/cancel-media {:load i}` | `(layer/cancel-media! "intro")` | stop one of those, by index or file name (none needed when only one loads) |
+| `:particle/loading` | `(particle/loading)` | particle source, obstacle and morph files still loading |
+| `:particle/cancel-load {:load i}` | `(particle/cancel-load!)` | stop one of those, by index or file name |
+| `:layer/postfx-previous`, `:layer/postfx-defaults` | `(layer/postfx-previous!)` | the post-processing panel's other two resets |
+| `:scene/add-cue {:at n}`, `:scene/move-cue`, `:scene/set-cue {:label s}` / `{:hold false}` | `(scene/add-cue! "Tunnel" :at 0)` | what the cue strip does: drop a preset between cues, drag a cue, name it, make a Timer cue wait for Go |
+
+```clojure
+(layer/add! :at 0)                           ; a new empty layer on top
+(println (layer/shader-source))              ; the active layer's shader
+(layer/media! "~/loops/long.mov")
+(layer/loading)                              ;=> [{:index 0 :file "long.mov" :done 40 :total 900 ...}]
+(layer/cancel-media!)
+```
+
 The older helpers in `f/` still work: `f/state`, `f/audio`, `f/set-param!`,
 `f/trigger!`, `f/data!`, `f/media!`, `f/put-trama!`. They send the same
 messages as the web remote.

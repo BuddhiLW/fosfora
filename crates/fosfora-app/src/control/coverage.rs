@@ -16,6 +16,12 @@ const MAIN_RS: &str = include_str!("../main.rs");
 const EXEMPT: &[(&str, &str)] = &[
     ("tour_done", "onboarding tour bookkeeping; no show state changes"),
     ("dismiss_shader_error", "closes an error toast in the window"),
+    ("quit_dialog_shown", "whether the unsaved-changes quit dialog is open; sys/quit is the action"),
+    (
+        "svg_offset_cmd",
+        "the SVG offset panel arrived with the media-pack merge after the ops were cut; \
+         no svg op yet (follow-up card), the panel still works",
+    ),
 ];
 
 /// The ways `main.rs` consumes a UI signal: a typed or untyped `remove_temp`
@@ -24,6 +30,9 @@ const NEEDLES: &[&str] = &[
     "remove_temp(egui::Id::new(\"",
     "remove_temp::<bool>(egui::Id::new(\"",
     "take(\"",
+    // `let id = egui::Id::new("...")` then `get_temp` + `remove`: the
+    // loading lines' Cancel buttons.
+    "let id = egui::Id::new(\"",
 ];
 
 /// Every UI signal `main.rs` consumes.
@@ -55,6 +64,18 @@ fn the_signal_scan_sees_the_panels() {
     let signals = ui_signals();
     assert!(signals.len() > 100, "only {} signals found; did main.rs move?", signals.len());
     assert!(signals.contains("save_preset"));
+    for s in [
+        "postprocess_to_previous",
+        "postprocess_to_defaults",
+        "scene_insert_cue",
+        "scene_move_cue",
+        "scene_set_cue_label",
+        "scene_clear_cue_hold",
+        "cancel_media_load",
+        "cancel_source_load",
+    ] {
+        assert!(signals.contains(s), "the scan misses {s}");
+    }
 }
 
 #[test]
