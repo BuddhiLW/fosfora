@@ -236,7 +236,7 @@ fn tours_escape_and_quit() {
     assert_eq!(s.call("system/tours", json!({})).unwrap().as_array().unwrap().len(), 2);
     s.call("system/tour", json!({"name": "layers"})).unwrap();
     assert_eq!(s.tour, Some(1));
-    assert!(s.call("system/tour", json!({})).is_err());
+    assert!(s.call("system/tour", json!({"index": 9})).is_err());
     s.view.overlay = false;
     assert_eq!(s.call("system/escape", json!({})).unwrap()["did"], "showed-interface");
     assert_eq!(s.call("system/quit", json!({})).unwrap()["asked"], true);
@@ -258,4 +258,77 @@ fn every_trigger_fires_by_name_and_unknown_ones_are_refused() {
     assert_eq!(s.triggers.last(), Some(&TriggerAction::NextPreset));
     assert!(s.call("system/trigger", json!({"action": "explode"})).is_err());
     assert!(s.call("system/trigger", json!({})).is_err());
+}
+
+// ── Unit: gaps (web port, ui scale, theme files, tours, quit cancel) ─────
+
+#[test]
+fn web_port_changes_in_range_and_refuses_others() {
+    let mut s = Stub::new();
+    assert_eq!(s.call("system/web", json!({"port": 9191})).unwrap()["port"], 9191);
+    for bad in [json!({"port": 80}), json!({"port": 70000}), json!({"port": "x"}), json!({"port": -1})] {
+        assert!(s.call("system/web", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.web.port, 9191, "refused calls change nothing");
+    assert!(
+        s.call("system/web", json!({"port": 80, "enabled": true})).is_err(),
+        "a bad port refuses the whole call"
+    );
+    assert!(!s.web.enabled);
+}
+
+#[test]
+fn ui_scale_reads_sets_in_range_and_refuses_others() {
+    let mut s = Stub::new();
+    assert_eq!(s.call("system/ui-scale", json!({})).unwrap(), json!({"scale": 1.0}));
+    assert_eq!(s.call("system/ui-scale", json!({"scale": 1.5})).unwrap(), json!({"scale": 1.5}));
+    for bad in [json!({"scale": 0.5}), json!({"scale": 3}), json!({"scale": "big"})] {
+        assert!(s.call("system/ui-scale", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.ui_scale, 1.5);
+}
+
+#[test]
+fn theme_files_reload_save_a_copy_and_show_the_folder() {
+    let mut s = Stub::new();
+    let list = s.call("system/theme-reload", json!({})).unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 3);
+    assert_eq!(s.theme_reloads, 1);
+    let r = s.call("system/theme-save-copy", json!({})).unwrap();
+    assert_eq!(r, json!({"name": "Gray copy", "index": 3, "count": 4}));
+    s.theme_save_fails = true;
+    assert!(s.call("system/theme-save-copy", json!({})).unwrap_err().contains("Could not save"));
+    assert_eq!(s.themes.len(), 4);
+    let r = s.call("system/theme-folder", json!({})).unwrap();
+    assert_eq!(r, json!({"dir": "/cfg/themes", "opened": false}));
+    assert_eq!(s.folder_opened, 0, "reading the folder opens nothing");
+    s.call("system/theme-folder", json!({"open": true})).unwrap();
+    assert_eq!(s.folder_opened, 1);
+}
+
+#[test]
+fn tour_reports_starts_and_ends_and_tours_say_which_were_taken() {
+    let mut s = Stub::new();
+    assert_eq!(s.call("system/tour", json!({})).unwrap(), json!({"running": false}));
+    let r = s.call("system/tour", json!({"index": 1})).unwrap();
+    assert_eq!(r["running"], true);
+    assert_eq!(s.call("system/tour", json!({})).unwrap()["name"], "Layers");
+    let list = s.call("system/tours", json!({})).unwrap();
+    assert_eq!(list[1]["current"], true);
+    assert_eq!(list[1]["taken"], false);
+    assert_eq!(list[0]["taken"], true);
+    assert_eq!(s.call("system/tour", json!({"end": true})).unwrap(), json!({"running": false}));
+    assert_eq!(s.tours_taken, [true, true]);
+    assert!(s.call("system/tour", json!({"name": "dance"})).is_err());
+}
+
+#[test]
+fn quit_cancel_closes_the_dialog() {
+    let mut s = Stub::new();
+    s.call("system/quit", json!({})).unwrap();
+    assert_eq!(s.quit, Some(false));
+    assert_eq!(s.call("system/quit", json!({"cancel": true})).unwrap()["asked"], false);
+    assert_eq!(s.quit, None);
+    let addon: &dyn ControlAddon<Stub> = &Addon;
+    assert!(addon.ui_signals().contains(&("quit_dialog_shown", "system/quit")));
 }

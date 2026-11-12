@@ -1,5 +1,6 @@
 pub mod client;
 mod local;
+mod setup;
 pub mod server;
 #[allow(dead_code)]
 pub mod state;

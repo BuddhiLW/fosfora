@@ -12,20 +12,21 @@ mod adapter;
 mod input;
 mod mapping;
 mod matrix;
+pub mod osc_net;
 pub mod pipeline;
 pub mod port;
 #[cfg(test)]
 mod tests;
 
 pub use self::pipeline::target_key;
-pub use self::port::{AudioPort, BindingsPort, MappingPort};
+pub use self::port::{AudioPort, BindingsPort, MappingPort, OscNetPort};
 use crate::control::{CljrsNs, ControlAddon, OpSpec};
 
 pub struct Addon;
 
 /// Everything a context needs for the binding ops.
-pub trait BindingsHost: BindingsPort + AudioPort + MappingPort {}
-impl<T: BindingsPort + AudioPort + MappingPort> BindingsHost for T {}
+pub trait BindingsHost: BindingsPort + AudioPort + MappingPort + OscNetPort {}
+impl<T: BindingsPort + AudioPort + MappingPort + OscNetPort> BindingsHost for T {}
 
 const PICK: &str = "{:id str | :index int | :name str}";
 
@@ -213,6 +214,18 @@ impl<C: BindingsHost + 'static> ControlAddon<C> for Addon {
                 "{:param str | :trigger str}",
                 "Remove an OSC mapping.",
                 mapping::osc_clear::<C>,
+            ),
+            OpSpec::new(
+                "bindings/osc-config",
+                "{:port int?, :lan bool?, :enabled bool?}",
+                "Read, or change, the OSC listener: port (1024..65535), other devices (saved; restarts it).",
+                osc_net::osc_config::<C>,
+            ),
+            OpSpec::new(
+                "bindings/osc-send",
+                "{:enabled bool?, :host str?, :port int?, :rate int?, :prefix fosfora|phosphor?}",
+                "Read, or change, sending the analysis to another app over OSC (saved).",
+                osc_net::osc_send::<C>,
             ),
         ]
     }

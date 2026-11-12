@@ -348,6 +348,7 @@ fn floats(v: &Value, n: usize) -> Option<Vec<f32>> {
 fn type_hint(def: &ParamDef) -> &'static str {
     match def {
         ParamDef::Float { .. } => "a number",
+        ParamDef::Int { .. } => "an integer",
         ParamDef::Bool { .. } => "true or false",
         ParamDef::Point2D { .. } => "[x y]",
         ParamDef::Color { .. } => "[r g b] or [r g b a]",
@@ -358,6 +359,10 @@ fn type_hint(def: &ParamDef) -> &'static str {
 pub fn param_value(def: &ParamDef, v: &Value) -> Result<ParamValue, String> {
     let value = match def {
         ParamDef::Float { .. } => v.as_f64().map(|f| ParamValue::Float(f as f32)),
+        ParamDef::Int { min, max, .. } => v
+            .as_f64()
+            .filter(|f| f.is_finite())
+            .map(|f| ParamValue::Float(f.round().clamp(f64::from(*min), f64::from(*max)) as f32)),
         ParamDef::Bool { .. } => v.as_bool().map(ParamValue::Bool),
         ParamDef::Point2D { .. } => floats(v, 2).map(|p| ParamValue::Point2D([p[0], p[1]])),
         ParamDef::Color { .. } => floats(v, 4)

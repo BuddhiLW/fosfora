@@ -1236,7 +1236,7 @@ impl ApplicationHandler for FosforaApp {
                                                 .clicked()
                                                 || esc_cancel
                                             {
-                                                app.quit_requested = false;
+                                                app.cancel_quit();
                                             }
                                         },
                                     );
@@ -1364,63 +1364,27 @@ impl ApplicationHandler for FosforaApp {
                 // the one in use as a new file to edit.
                 {
                     use crate::ui::panels::appearance_panel::ThemeIntent;
-                    use crate::ui::theme::custom;
                     let intent: Option<ThemeIntent> = app.egui_overlay.context().data_mut(|d| {
                         let id = egui::Id::new(ThemeIntent::ID);
                         let v = d.get_temp(id);
                         d.remove::<ThemeIntent>(id);
                         v
                     });
-                    let mut pick = None;
-                    let relisted =
-                        matches!(intent, Some(ThemeIntent::Reload | ThemeIntent::SaveCopy));
-                    match intent {
-                        Some(ThemeIntent::Use(theme)) => pick = Some(theme),
+                    let failed = match intent {
+                        Some(ThemeIntent::Use(theme)) => {
+                            app.apply_theme(theme);
+                            None
+                        }
                         Some(ThemeIntent::Reload) => {
-                            app.custom_themes = custom::load_dir(&custom::themes_dir());
-                            pick = Some(app.settings.theme.clone());
+                            app.reload_themes();
+                            None
                         }
-                        Some(ThemeIntent::SaveCopy) => {
-                            let name = format!(
-                                "{} copy",
-                                app.settings.theme.display_name(&app.custom_themes)
-                            );
-                            match custom::write_new(
-                                &custom::themes_dir(),
-                                &name,
-                                &app.egui_overlay.palette,
-                            ) {
-                                Ok(path) => {
-                                    log::info!("theme saved to {}", path.display());
-                                    app.custom_themes = custom::load_dir(&custom::themes_dir());
-                                    pick = path
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .map(|s| crate::ui::theme::ThemeMode::Custom(s.into()));
-                                }
-                                Err(e) => {
-                                    app.status_error = Some((
-                                        format!("Could not save the theme: {e}"),
-                                        std::time::Instant::now(),
-                                    ));
-                                }
-                            }
-                        }
-                        Some(ThemeIntent::OpenFolder) => {
-                            if let Err(e) = custom::reveal(&custom::themes_dir()) {
-                                app.status_error = Some((
-                                    format!("Could not open the themes folder: {e}"),
-                                    std::time::Instant::now(),
-                                ));
-                            }
-                        }
-                        None => {}
-                    }
-                    if relisted {
-                        custom::publish(&app.egui_overlay.context(), &app.custom_themes);
-                    }
-                    if let Some(theme) = pick {
-                        app.apply_theme(theme);
+                        Some(ThemeIntent::SaveCopy) => app.save_theme_copy().err(),
+                        Some(ThemeIntent::OpenFolder) => app.open_themes_folder().err(),
+                        None => None,
+                    };
+                    if let Some(msg) = failed {
+                        app.status_error = Some((msg, std::time::Instant::now()));
                     }
                 }
 

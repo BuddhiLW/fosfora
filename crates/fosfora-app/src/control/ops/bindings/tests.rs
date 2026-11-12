@@ -39,7 +39,23 @@ struct Stub {
     enabled: [bool; 2],
     maps: [BTreeMap<String, MapTarget>; 2],
     map_learning: [Option<MapTarget>; 2],
+    osc_net: Option<OscSettings>,
     registry: Registry<Stub>,
+}
+
+fn osc_defaults() -> OscSettings {
+    OscSettings {
+        enabled: true,
+        rx_port: 9000,
+        rx_lan: false,
+        active: false,
+        last_address: None,
+        tx_enabled: false,
+        tx_host: "127.0.0.1".into(),
+        tx_port: 9001,
+        tx_rate_hz: 30,
+        tx_prefix: "fosfora".into(),
+    }
 }
 
 fn slot(p: Proto) -> usize {
@@ -56,6 +72,7 @@ impl Stub {
             devices: vec!["Built-in".into(), "USB Audio".into()],
             ports: vec!["MPD218".into(), "nanoKONTROL".into()],
             enabled: [true, true],
+            osc_net: Some(osc_defaults()),
             ..Self::default()
         };
         s.registry.register(&Addon as &dyn ControlAddon<Stub>);
@@ -255,6 +272,42 @@ impl MappingPort for Stub {
     }
     fn clear_mapping(&mut self, proto: Proto, target: &MapTarget) -> bool {
         self.maps[slot(proto)].remove(&target_key(target)).is_some()
+    }
+}
+
+impl Stub {
+    fn net(&mut self) -> &mut OscSettings {
+        self.osc_net.as_mut().unwrap()
+    }
+}
+
+impl OscNetPort for Stub {
+    fn osc_settings(&self) -> OscSettings {
+        let mut s = self.osc_net.clone().unwrap();
+        s.enabled = self.enabled[1];
+        s
+    }
+    fn set_osc_enabled(&mut self, on: bool) {
+        self.enabled[1] = on;
+    }
+    fn set_osc_rx_port(&mut self, port: u16) {
+        self.net().rx_port = port;
+    }
+    fn set_osc_rx_lan(&mut self, lan: bool) {
+        self.net().rx_lan = lan;
+    }
+    fn set_osc_tx_enabled(&mut self, on: bool) {
+        self.net().tx_enabled = on;
+    }
+    fn set_osc_tx_target(&mut self, host: &str, port: u16) {
+        self.net().tx_host = host.into();
+        self.net().tx_port = port;
+    }
+    fn set_osc_tx_rate(&mut self, hz: u32) {
+        self.net().tx_rate_hz = hz;
+    }
+    fn set_osc_tx_prefix(&mut self, prefix: &str) {
+        self.net().tx_prefix = prefix.into();
     }
 }
 
@@ -889,6 +942,89 @@ fn random_op_sequences_keep_ids_unique_and_results_pointing_at_live_bindings() {
                     assert!(s.bindings.iter().any(|b| b.id == id), "{op} -> {v}");
                 }
             }
+        }
+    });
+}
+
+// ── Unit: OSC listener and sender settings ─────────────────────────────────
+
+#[test]
+fn osc_config_reads_changes_and_refuses_bad_ports() {
+    let mut s = Stub::new();
+    let r = s.call("bindings/osc-config", json!({})).unwrap();
+    assert_eq!(r["port"], 9000);
+    assert_eq!(r["lan"], false);
+    let r = s
+        .call("bindings/osc-config", json!({"port": 9100, "lan": true}))
+        .unwrap();
+    assert_eq!((r["port"].as_u64(), r["lan"].as_bool()), (Some(9100), Some(true)));
+    for bad in [json!({"port": 53}), json!({"port": 70000}), json!({"port": "x"})] {
+        assert!(s.call("bindings/osc-config", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.net().rx_port, 9100, "refused calls change nothing");
+    assert_eq!(
+        s.call("bindings/osc-config", json!({"enabled": false})).unwrap()["enabled"],
+        false
+    );
+    assert!(!s.enabled[1]);
+}
+
+#[test]
+fn osc_send_reads_changes_and_refuses_bad_values() {
+    let mut s = Stub::new();
+    let r = s.call("bindings/osc-send", json!({})).unwrap();
+    assert_eq!(r, json!({"enabled": false, "host": "127.0.0.1", "port": 9001, "rate": 30, "prefix": "fosfora"}));
+    let r = s
+        .call(
+            "bindings/osc-send",
+            json!({"enabled": true, "host": "10.0.0.5", "rate": 60, "prefix": "/Phosphor/"}),
+        )
+        .unwrap();
+    assert_eq!(r, json!({"enabled": true, "host": "10.0.0.5", "port": 9001, "rate": 60, "prefix": "phosphor"}));
+    for bad in [
+        json!({"host": ""}),
+        json!({"host": "a b"}),
+        json!({"host": 7}),
+        json!({"rate": 0}),
+        json!({"rate": 500}),
+        json!({"prefix": "osc"}),
+        json!({"prefix": 1}),
+        json!({"port": 1}),
+        json!({"port": 9002, "rate": 0}),
+    ] {
+        assert!(s.call("bindings/osc-send", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.net().tx_port, 9001, "a refused call changes nothing");
+    assert_eq!(s.net().tx_rate_hz, 60);
+}
+
+#[test]
+fn osc_send_change_from_args_is_total_and_keeps_values_in_range() {
+    use super::osc_net::{OscSendChange, TX_RATE_RANGE};
+    let values = [
+        json!(null),
+        json!(true),
+        json!(0),
+        json!(30),
+        json!(9001),
+        json!(70000),
+        json!("fosfora"),
+        json!("host.local"),
+        json!(""),
+    ];
+    let keys = ["enabled", "host", "port", "rate", "prefix"];
+    cases(400, 0x5EED_B006, |rng, _| {
+        let mut a = serde_json::Map::new();
+        for _ in 0..rng.below(4) {
+            a.insert(
+                (*rng.pick(&keys).unwrap()).to_owned(),
+                rng.pick(&values).unwrap().clone(),
+            );
+        }
+        if let Ok(c) = OscSendChange::from_args(&Value::Object(a)) {
+            assert!(c.rate.is_none_or(|r| TX_RATE_RANGE.contains(&r)));
+            assert!(c.port.is_none_or(|p| p >= 1024));
+            assert!(c.host.as_deref().is_none_or(|h| !h.is_empty()));
         }
     });
 }

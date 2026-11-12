@@ -40,6 +40,28 @@ pub fn opt_bool(args: &Value, key: &str) -> Option<bool> {
     args.get(key).and_then(Value::as_bool)
 }
 
+/// The ports the Setup page offers for a listener or a target.
+pub const PORT_RANGE: std::ops::RangeInclusive<u16> = 1024..=65535;
+
+/// A network port at `key` inside [`PORT_RANGE`]; absent is `None`.
+pub fn opt_port(args: &Value, key: &str) -> Result<Option<u16>, String> {
+    match args.get(key) {
+        None => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .filter(|n| PORT_RANGE.contains(n))
+            .map(Some)
+            .ok_or_else(|| {
+                format!(
+                    ":{key} must be a port in {}..={}, got {v}",
+                    PORT_RANGE.start(),
+                    PORT_RANGE.end()
+                )
+            }),
+    }
+}
+
 /// A transition kind by name: `cut`, `dissolve`, `morph` (or `param_morph`),
 /// any case. Absent is `None`; an unknown name is an error.
 pub fn opt_transition(

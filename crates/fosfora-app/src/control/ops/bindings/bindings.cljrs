@@ -15,7 +15,9 @@
     (bind/save! :global)
     (bind/audio) (bind/device! \"USB\") (bind/trim! 3.0) (bind/sync-offset! 40)
     (bind/tuning! :drop-loud-jump 0.05)
-    (bind/midi) (bind/midi-learn! :param \"speed\") (bind/osc-learn! :trigger :next-preset)"
+    (bind/midi) (bind/midi-learn! :param \"speed\") (bind/osc-learn! :trigger :next-preset)
+    (bind/osc-config! :port 9000 :lan true)
+    (bind/osc-send! :enabled true :host \"127.0.0.1\" :port 9001 :rate 30)"
   (:require [fosfora :as f]
             [clojure.string :as str]))
 
@@ -143,3 +145,16 @@
 
 (defn osc-stop-learn! [] (f/op :bindings/osc-learn {:cancel true}))
 (defn osc-clear! [kind target] (f/op :bindings/osc-clear (mapping-target kind target)))
+
+(defn osc-config [] (f/op :bindings/osc-config))
+(defn osc-config!
+  "Change the OSC listener: :port 1024..65535, :lan bool, :enabled bool. Restarts it."
+  [& opts]
+  (f/op :bindings/osc-config (opts->args opts)))
+
+(defn osc-send [] (f/op :bindings/osc-send))
+(defn osc-send!
+  "Send the analysis over OSC: :enabled bool, :host str, :port int, :rate per second,
+  :prefix :fosfora|:phosphor."
+  [& opts]
+  (f/op :bindings/osc-send (opts->args opts)))

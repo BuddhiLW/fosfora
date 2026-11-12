@@ -3,7 +3,7 @@
 
 use super::port::{
     AudioPort, AudioState, BindingEdit, BindingsPort, MapTarget, MappingPort, MappingRow,
-    MappingSource, Proto, SourceRow, TargetRow,
+    MappingSource, OscNetPort, OscSettings, Proto, SourceRow, TargetRow,
 };
 use crate::app::App;
 use crate::audio::StructureConfig;
@@ -300,5 +300,51 @@ impl MappingPort for App {
                 had
             }
         }
+    }
+}
+
+impl OscNetPort for App {
+    fn osc_settings(&self) -> OscSettings {
+        let c = &self.osc.config;
+        OscSettings {
+            enabled: c.enabled,
+            rx_port: c.rx_port,
+            rx_lan: c.rx_lan,
+            active: self.osc.is_recently_active(),
+            last_address: self.osc.last_address.clone(),
+            tx_enabled: c.tx_enabled,
+            tx_host: c.tx_host.clone(),
+            tx_port: c.tx_port,
+            tx_rate_hz: c.tx_rate_hz,
+            tx_prefix: c.tx_prefix.clone(),
+        }
+    }
+
+    fn set_osc_enabled(&mut self, on: bool) {
+        self.osc.set_enabled(on);
+    }
+
+    fn set_osc_rx_port(&mut self, port: u16) {
+        self.osc.set_rx_port(port);
+    }
+
+    fn set_osc_rx_lan(&mut self, lan: bool) {
+        self.osc.set_rx_lan(lan);
+    }
+
+    fn set_osc_tx_enabled(&mut self, on: bool) {
+        self.osc.set_tx_enabled(on);
+    }
+
+    fn set_osc_tx_target(&mut self, host: &str, port: u16) {
+        self.osc.set_tx_target(host, port);
+    }
+
+    fn set_osc_tx_rate(&mut self, hz: u32) {
+        self.osc.set_tx_rate(hz);
+    }
+
+    fn set_osc_tx_prefix(&mut self, prefix: &str) {
+        self.osc.set_tx_prefix(prefix);
     }
 }
