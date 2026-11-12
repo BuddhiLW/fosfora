@@ -193,10 +193,45 @@ pub fn theme<P: SettingsPort>(port: &mut P, a: &Value) -> OpResult {
 pub fn web<P: SettingsPort>(port: &mut P, a: &Value) -> OpResult {
     let enabled = args::opt_bool(a, "enabled");
     let lan = args::opt_bool(a, "lan");
+    let new_port = args::opt_port(a, "port")?;
+    if let Some(p) = new_port.filter(|&p| p != port.web_status().port) {
+        port.set_web_port(p);
+    }
     if enabled.is_some() || lan.is_some() {
         port.set_web(enabled, lan);
     }
     Ok(port.web_status().to_json())
+}
+
+pub fn ui_scale<P: SettingsPort>(port: &mut P, a: &Value) -> OpResult {
+    match model::ui_scale_arg(a)? {
+        Some(s) => {
+            port.set_ui_scale(s);
+            Ok(json!({"scale": s}))
+        }
+        None => Ok(json!({"scale": port.ui_scale()})),
+    }
+}
+
+pub fn theme_reload<P: SettingsPort>(port: &mut P, _: &Value) -> OpResult {
+    port.reload_themes();
+    let (names, current) = port.themes();
+    Ok(model::listing(&names, current))
+}
+
+pub fn theme_save_copy<P: SettingsPort>(port: &mut P, _: &Value) -> OpResult {
+    let name = port.save_theme_copy()?;
+    let (names, current) = port.themes();
+    Ok(json!({"name": name, "index": current, "count": names.len()}))
+}
+
+pub fn theme_folder<P: SettingsPort>(port: &mut P, a: &Value) -> OpResult {
+    let dir = port.themes_folder().display().to_string();
+    let open = args::opt_bool(a, "open").unwrap_or(false);
+    if open {
+        port.open_themes_folder()?;
+    }
+    Ok(json!({"dir": dir, "opened": open}))
 }
 
 pub fn web_replace_key<P: SettingsPort>(port: &mut P, _: &Value) -> OpResult {
@@ -241,15 +276,35 @@ pub fn workspace<P: ShellPort>(port: &mut P, a: &Value) -> OpResult {
     Ok(json!(port.view().workspace.name()))
 }
 
+fn tours_now<P: ShellPort>(port: &P) -> Value {
+    let current = port.current_tour().map(|(i, _)| i);
+    model::tour_listing(&port.tour_names(), current, &port.tours_taken())
+}
+
 pub fn tours<P: ShellPort>(port: &mut P, _: &Value) -> OpResult {
-    Ok(model::listing(&port.tour_names(), None))
+    Ok(tours_now(port))
+}
+
+fn tour_now<P: ShellPort>(port: &P) -> Value {
+    let names = port.tour_names();
+    match port.current_tour() {
+        Some((i, step)) => json!({"index": i, "name": names.get(i), "step": step, "running": true}),
+        None => json!({"running": false}),
+    }
 }
 
 pub fn tour<P: ShellPort>(port: &mut P, a: &Value) -> OpResult {
+    if args::opt_bool(a, "end").unwrap_or(false) {
+        port.end_tour();
+        return Ok(tour_now(port));
+    }
+    if a.get("index").is_none() && a.get("name").is_none() {
+        return Ok(tour_now(port));
+    }
     let names = port.tour_names();
     let index = args::pick(a, &names, "tour")?;
     port.start_tour(index);
-    Ok(json!({"index": index, "name": names[index]}))
+    Ok(json!({"index": index, "name": names[index], "step": 0, "running": true}))
 }
 
 pub fn escape<P: ShellPort>(port: &mut P, _: &Value) -> OpResult {
@@ -260,6 +315,10 @@ pub fn escape<P: ShellPort>(port: &mut P, _: &Value) -> OpResult {
 }
 
 pub fn quit<P: ShellPort>(port: &mut P, a: &Value) -> OpResult {
+    if args::opt_bool(a, "cancel").unwrap_or(false) {
+        port.cancel_quit();
+        return Ok(json!({"quitting": false, "asked": false}));
+    }
     let confirm = args::opt_bool(a, "confirm").unwrap_or(false);
     port.request_quit(confirm);
     Ok(json!({"quitting": confirm, "asked": !confirm}))

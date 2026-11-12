@@ -7,6 +7,7 @@
 //! `main.rs` in `actions` (`impl App`).
 
 mod actions;
+mod appearance;
 mod boundary;
 pub mod model;
 pub mod port;
@@ -83,7 +84,36 @@ impl<C: SystemPort + 'static> ControlAddon<C> for Addon {
                 b::settings::<C>,
             ),
             OpSpec::new("system/theme", "{:index int | :name str}?", "List themes, or use one.", b::theme::<C>),
-            OpSpec::new("system/web", "{:enabled bool?, :lan bool?}", "Read, or change, the web remote.", b::web::<C>),
+            OpSpec::new(
+                "system/theme-reload",
+                "{}",
+                "Read the themes folder again (Reload); the theme list.",
+                b::theme_reload::<C>,
+            ),
+            OpSpec::new(
+                "system/theme-save-copy",
+                "{}",
+                "Save the theme in use as a new file to edit, and use it.",
+                b::theme_save_copy::<C>,
+            ),
+            OpSpec::new(
+                "system/theme-folder",
+                "{:open bool?}",
+                "Where theme files live; :open true shows it in the file browser.",
+                b::theme_folder::<C>,
+            ),
+            OpSpec::new(
+                "system/ui-scale",
+                "{:scale num?}",
+                "Read, or change, the interface scale (0.8..2.0, 1.0 = 100 %; saved).",
+                b::ui_scale::<C>,
+            ),
+            OpSpec::new(
+                "system/web",
+                "{:enabled bool?, :lan bool?, :port int?}",
+                "Read, or change, the web remote (a new :port restarts it).",
+                b::web::<C>,
+            ),
             OpSpec::new(
                 "system/web-replace-key",
                 "{}",
@@ -97,10 +127,20 @@ impl<C: SystemPort + 'static> ControlAddon<C> for Addon {
             OpSpec::new("system/binding-matrix", "{:open bool?}", "Open/close the binding matrix (B); {} toggles.", b::binding_matrix::<C>),
             OpSpec::new("system/chain-editor", "{:open bool?}", "Open/close the chain editor (C); {} toggles.", b::chain_editor::<C>),
             OpSpec::new("system/workspace", "{:name perform|build|setup?}", "Read, or switch, the workspace.", b::workspace::<C>),
-            OpSpec::new("system/tours", "{}", "The guided tours.", b::tours::<C>),
-            OpSpec::new("system/tour", "{:index int | :name str}", "Start a guided tour.", b::tour::<C>),
+            OpSpec::new("system/tours", "{}", "The guided tours {index name current taken}.", b::tours::<C>),
+            OpSpec::new(
+                "system/tour",
+                "{:index int | :name str | :end true}?",
+                "Start a guided tour, end the one showing, or with {} say which shows.",
+                b::tour::<C>,
+            ),
             OpSpec::new("system/escape", "{}", "One step of the Esc key; what it did.", b::escape::<C>),
-            OpSpec::new("system/quit", "{:confirm bool?}", "Ask to quit, or quit with :confirm true.", b::quit::<C>),
+            OpSpec::new(
+                "system/quit",
+                "{:confirm bool?, :cancel bool?}",
+                "Ask to quit, quit with :confirm true, or close the dialog with :cancel true.",
+                b::quit::<C>,
+            ),
             // Triggers
             OpSpec::new("system/triggers", "{}", "Every trigger action name.", b::triggers::<C>),
             OpSpec::new("system/trigger", "{:action str}", "Fire a MIDI/OSC/web trigger action.", b::trigger::<C>),
@@ -142,6 +182,7 @@ impl<C: SystemPort + 'static> ControlAddon<C> for Addon {
             ("set_auto_reconnect", "system/settings"),
             ("request_hide_overlay", "system/overlay"),
             ("confirm_quit", "system/quit"),
+            ("quit_dialog_shown", "system/quit"),
         ]
     }
 

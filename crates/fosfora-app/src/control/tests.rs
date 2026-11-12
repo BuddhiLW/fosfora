@@ -1,5 +1,8 @@
 //! Registry and queue: unit + property, against a context with no app.
 
+// Every op body has the fixed `OpFn` signature, infallible ones included.
+#![allow(clippy::unnecessary_wraps)]
+
 use std::time::Duration;
 
 use serde_json::{Value, json};

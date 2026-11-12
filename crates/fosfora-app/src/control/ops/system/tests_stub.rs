@@ -31,9 +31,15 @@ pub(super) struct Stub {
     pub(super) theme: usize,
     pub(super) web: WebStatus,
     pub(super) key_replaced: usize,
+    pub(super) ui_scale: f32,
+    pub(super) theme_reloads: usize,
+    pub(super) theme_save_fails: bool,
+    pub(super) folder_opened: usize,
+    pub(super) tours_taken: Vec<bool>,
     pub(super) view: ViewState,
     pub(super) tours: Vec<String>,
     pub(super) tour: Option<usize>,
+    pub(super) tour_step: usize,
     pub(super) quit: Option<bool>,
     pub(super) triggers: Vec<TriggerAction>,
     pub(super) registry: Registry<Stub>,
@@ -79,6 +85,11 @@ impl Stub {
             theme: 1,
             web: WebStatus { enabled: false, running: false, lan: false, port: 9090, clients: 0 },
             key_replaced: 0,
+            ui_scale: 1.0,
+            theme_reloads: 0,
+            theme_save_fails: false,
+            folder_opened: 0,
+            tours_taken: vec![true, false],
             view: ViewState {
                 overlay: true,
                 fullscreen: false,
@@ -88,6 +99,7 @@ impl Stub {
             },
             tours: vec!["First run".into(), "Layers".into()],
             tour: None,
+            tour_step: 0,
             quit: None,
             triggers: Vec::new(),
             registry: Registry::default(),
@@ -258,6 +270,34 @@ impl SettingsPort for Stub {
     fn replace_web_key(&mut self) {
         self.key_replaced += 1;
     }
+    fn set_web_port(&mut self, port: u16) {
+        self.web.port = port;
+    }
+    fn ui_scale(&self) -> f32 {
+        self.ui_scale
+    }
+    fn set_ui_scale(&mut self, scale: f32) {
+        self.ui_scale = scale;
+    }
+    fn reload_themes(&mut self) {
+        self.theme_reloads += 1;
+    }
+    fn save_theme_copy(&mut self) -> Result<String, String> {
+        if self.theme_save_fails {
+            return Err("Could not save the theme: read-only".into());
+        }
+        let name = format!("{} copy", self.themes[self.theme]);
+        self.themes.push(name.clone());
+        self.theme = self.themes.len() - 1;
+        Ok(name)
+    }
+    fn themes_folder(&self) -> PathBuf {
+        PathBuf::from("/cfg/themes")
+    }
+    fn open_themes_folder(&mut self) -> Result<(), String> {
+        self.folder_opened += 1;
+        Ok(())
+    }
 }
 
 impl ShellPort for Stub {
@@ -288,8 +328,20 @@ impl ShellPort for Stub {
     fn tour_names(&self) -> Vec<String> {
         self.tours.clone()
     }
+    fn tours_taken(&self) -> Vec<bool> {
+        self.tours_taken.clone()
+    }
+    fn current_tour(&self) -> Option<(usize, usize)> {
+        self.tour.map(|t| (t, self.tour_step))
+    }
     fn start_tour(&mut self, index: usize) {
         self.tour = Some(index);
+        self.tour_step = 0;
+    }
+    fn end_tour(&mut self) {
+        if let Some(t) = self.tour.take() {
+            self.tours_taken[t] = true;
+        }
     }
     fn escape(&mut self) -> &'static str {
         if self.view.binding_matrix {
@@ -305,6 +357,9 @@ impl ShellPort for Stub {
     }
     fn request_quit(&mut self, confirm: bool) {
         self.quit = Some(confirm);
+    }
+    fn cancel_quit(&mut self) {
+        self.quit = None;
     }
     fn run_trigger(&mut self, action: TriggerAction) {
         self.triggers.push(action);

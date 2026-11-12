@@ -45,7 +45,9 @@ fn encode(v: &B, out: &mut Vec<u8>) {
         }
         B::List(items) => {
             out.push(b'l');
-            items.iter().for_each(|i| encode(i, out));
+            for i in items {
+                encode(i, out);
+            }
             out.push(b'e');
         }
         B::Dict(kv) => {
@@ -361,4 +363,52 @@ fn the_svg_namespace_reads_and_restores_an_svg_offset_layer_over_nrepl() {
     assert_eq!(repl.eval("(:rotation (svg/rotate! 12.5))").unwrap(), "12.5");
     repl.eval(&format!("(svg/rotate! {before})")).unwrap();
     assert_eq!(repl.eval("(:rotation (svg/state))").unwrap(), before);
+}
+
+#[test]
+fn osc_listener_and_sender_settings_read_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // Reads, plus refusals that change nothing: the user's OSC rig is untouched.
+    let rx = repl.eval("(:port (bind/osc-config))").unwrap();
+    assert!(rx.parse::<u16>().is_ok_and(|p| p >= 1024), "{rx}");
+    let prefix = repl.eval("(:prefix (bind/osc-send))").unwrap();
+    assert!(
+        ["\"fosfora\"", "\"phosphor\""].contains(&prefix.as_str()),
+        "{prefix}"
+    );
+    let e = repl.eval("(bind/osc-config! :port 80)").unwrap_err();
+    assert!(e.contains(":port"), "{e}");
+    let e = repl.eval("(bind/osc-send! :rate 0)").unwrap_err();
+    assert!(e.contains(":rate"), "{e}");
+    assert_eq!(repl.eval("(:port (bind/osc-config))").unwrap(), rx);
+}
+
+#[test]
+fn appearance_web_port_and_tours_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    // The scale is set to what it already is, so nothing visibly changes.
+    let scale = repl.eval("(:scale (sys/ui-scale))").unwrap();
+    assert_eq!(
+        repl.eval(&format!("(:scale (sys/ui-scale! {scale}))"))
+            .unwrap(),
+        scale
+    );
+    let e = repl.eval("(sys/ui-scale! 9)").unwrap_err();
+    assert!(e.contains(":scale"), "{e}");
+    let dir = repl.eval("(:dir (sys/theme-folder))").unwrap();
+    assert!(dir.contains("theme"), "{dir}");
+    let before = repl.eval("(count (sys/themes))").unwrap();
+    assert_eq!(repl.eval("(count (sys/reload-themes!))").unwrap(), before);
+    let port = repl.eval("(:port (sys/web))").unwrap();
+    let e = repl.eval("(sys/web! :port 1)").unwrap_err();
+    assert!(e.contains(":port"), "{e}");
+    assert_eq!(repl.eval("(:port (sys/web))").unwrap(), port);
+    assert_eq!(repl.eval("(count (sys/tours))").unwrap(), "4");
+    assert_eq!(repl.eval("(contains? (sys/tour) :running)").unwrap(), "true");
 }

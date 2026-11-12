@@ -1,5 +1,8 @@
 //! `ops`, `addons`: what the registry holds. Generic over any [`OpHost`].
 
+// Every op body has the fixed `OpFn` signature, infallible ones included.
+#![allow(clippy::unnecessary_wraps)]
+
 use serde_json::{Value, json};
 
 use crate::control::{ControlAddon, OpHost, OpResult, OpSpec};

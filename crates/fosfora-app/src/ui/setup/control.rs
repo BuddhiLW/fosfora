@@ -154,9 +154,7 @@ fn osc_block(ui: &mut Ui, osc: &mut OscSystem) {
                     )
                     .changed()
                 {
-                    osc.config.rx_port = port;
-                    osc.config.save();
-                    osc.restart_receiver();
+                    osc.set_rx_port(port);
                 }
                 kit::help(ui, "UDP. Changing it restarts the listener.");
             });
@@ -215,13 +213,7 @@ fn osc_block(ui: &mut Ui, osc: &mut OscSystem) {
                     )
                     .changed();
                 if host_changed || port_changed {
-                    osc.config.tx_host = host;
-                    osc.config.tx_port = port;
-                    osc.config.save();
-                    if osc.config.tx_enabled {
-                        osc.sender
-                            .configure(&osc.config.tx_host, osc.config.tx_port);
-                    }
+                    osc.set_tx_target(&host, port);
                 }
             });
             kit::row(ui, "Rate", |ui| {
@@ -230,8 +222,7 @@ fn osc_block(ui: &mut Ui, osc: &mut OscSystem) {
                     .add(egui::DragValue::new(&mut rate).range(1..=120).speed(1.0))
                     .changed()
                 {
-                    osc.config.tx_rate_hz = rate;
-                    osc.config.save();
+                    osc.set_tx_rate(rate);
                 }
                 ui.label(RichText::new("times a second").size(kit::LABEL_SIZE));
             });
@@ -278,9 +269,7 @@ fn web_block(ui: &mut Ui, web: &mut WebSystem) {
                     )
                     .changed()
                 {
-                    web.config.port = port;
-                    web.config.save();
-                    web.restart_server();
+                    web.set_port(port);
                 }
                 kit::help(ui, "Changing it restarts the server.");
             });

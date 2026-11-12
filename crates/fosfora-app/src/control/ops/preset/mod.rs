@@ -4,6 +4,9 @@
 //! Promote (`Target`, `LoadMode` from args) -> Pipeline (pure: `step`,
 //! `copy_name`, `listing`) -> Boundary (one [`PresetPort`] call per op).
 
+// Every op body has the fixed `OpFn` signature, infallible ones included.
+#![allow(clippy::unnecessary_wraps)]
+
 pub mod port;
 #[cfg(test)]
 mod tests;
@@ -124,7 +127,8 @@ pub fn copy_name<S: AsRef<str>>(base: &str, existing: &[S]) -> String {
     if !taken(&first) {
         return first;
     }
-    (2..)
+    // n names are taken at most, so one of 2..=n+2 is free.
+    (2..=existing.len() + 2)
         .map(|n| format!("{first} {n}"))
         .find(|c| !taken(c))
         .unwrap_or(first)

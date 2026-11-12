@@ -450,6 +450,10 @@ fn real_of(t: f32, lo: f32, hi: f32) -> f32 {
 pub fn normalize(def: &ParamDef, v: &ParamValue) -> Option<Value> {
     match (def, v) {
         (ParamDef::Float { min, max, .. }, ParamValue::Float(x)) => Some(json!(unit_of(*x, *min, *max))),
+        #[allow(clippy::cast_precision_loss)]
+        (ParamDef::Int { min, max, .. }, ParamValue::Float(x)) => {
+            Some(json!(unit_of(*x, *min as f32, *max as f32)))
+        }
         (ParamDef::Point2D { min, max, .. }, ParamValue::Point2D(p)) => Some(json!([
             unit_of(p[0], min[0], max[0]),
             unit_of(p[1], min[1], max[1])
@@ -470,6 +474,10 @@ pub fn param_json(def: &ParamDef, value: Option<&ParamValue>) -> Value {
         "normalized": normalize(def, value),
     });
     match def {
+        ParamDef::Int { min, max, .. } => {
+            out["min"] = json!(min);
+            out["max"] = json!(max);
+        }
         ParamDef::Float { min, max, .. } => {
             out["min"] = json!(min);
             out["max"] = json!(max);
@@ -526,9 +534,11 @@ pub fn promote_param(def: &ParamDef, raw: &Value, normalized: bool) -> Result<Pa
     match def {
         // Stored as f32 like every scalar (see `ParamDef::default_value`), rounded.
         #[allow(clippy::cast_precision_loss)]
-        ParamDef::Int { min, max, .. } => Ok(ParamValue::Float(
-            ranged(num_in(raw, what)?, *min as f32, *max as f32, normalized, what)?.round(),
-        )),
+        ParamDef::Int { min, max, .. } => {
+            let (lo, hi) = (*min as f32, *max as f32);
+            let x = ranged(num_in(raw, what)?, lo, hi, normalized, what)?;
+            Ok(ParamValue::Float(x.round().clamp(lo.min(hi), hi.max(lo))))
+        }
         ParamDef::Float { min, max, .. } => {
             Ok(ParamValue::Float(ranged(num_in(raw, what)?, *min, *max, normalized, what)?))
         }

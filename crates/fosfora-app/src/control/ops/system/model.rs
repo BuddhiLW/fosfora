@@ -633,6 +633,33 @@ impl WebStatus {
     }
 }
 
+/// The interface scale at `:scale` (1.0 = 100 %), inside the Appearance
+/// slider's range; absent is `None`.
+pub fn ui_scale_arg(a: &Value) -> Result<Option<f32>, String> {
+    use crate::ui::panels::appearance_panel::{SCALE_MAX, SCALE_MIN};
+    #[allow(clippy::cast_precision_loss)]
+    let (lo, hi) = (SCALE_MIN as f32 / 100.0, SCALE_MAX as f32 / 100.0);
+    match a.get("scale") {
+        None => Ok(None),
+        Some(_) => match args::opt_f32(a, "scale") {
+            Some(s) if s.is_finite() && (lo..=hi).contains(&s) => Ok(Some(s)),
+            _ => Err(format!(":scale must be a number in {lo}..={hi} (1.0 = 100 %)")),
+        },
+    }
+}
+
+/// `[{index name current taken}]`: the tours, which one shows, which were
+/// finished or skipped.
+pub fn tour_listing(names: &[String], current: Option<usize>, taken: &[bool]) -> Value {
+    let mut v = listing(names, current);
+    if let Value::Array(rows) = &mut v {
+        for (row, t) in rows.iter_mut().zip(taken) {
+            row["taken"] = json!(t);
+        }
+    }
+    v
+}
+
 /// The interface's workspaces (top bar).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {

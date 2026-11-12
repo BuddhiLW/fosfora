@@ -11,7 +11,8 @@
     (sys/output! :ndi :enabled true :name \"Stage\" :resolution :1080p)
     (sys/output-window! 1) (sys/output-window! :close)
     (sys/settings! :flash-limit :strict)
-    (sys/theme! \"black\")
+    (sys/theme! \"black\") (sys/reload-themes!) (sys/save-theme-copy!) (sys/ui-scale! 1.25)
+    (sys/web! :port 9090) (sys/tour! \"layers\") (sys/tour! :end)
     (sys/overlay!) (sys/fullscreen! true) (sys/escape!)
     (sys/trigger! :next-preset)
     (sys/quit!)                          ; the dialog; (sys/quit! :confirm) quits"
@@ -77,8 +78,23 @@
   (f/op :system/settings (opts kvs)))
 (defn themes [] (f/op :system/theme))
 (defn theme! [t] (f/op :system/theme (target t)))
+(defn reload-themes! [] (f/op :system/theme-reload))
+(defn save-theme-copy!
+  "Save the theme in use as a new file in the themes folder, and use it."
+  []
+  (f/op :system/theme-save-copy))
+(defn theme-folder [] (f/op :system/theme-folder))
+(defn open-theme-folder! [] (f/op :system/theme-folder {:open true}))
+(defn ui-scale [] (f/op :system/ui-scale))
+(defn ui-scale!
+  "Interface scale, 0.8..2.0 (1.0 = 100 %)."
+  [s]
+  (f/op :system/ui-scale {:scale (double s)}))
 (defn web [] (f/op :system/web))
-(defn web! [& kvs] (f/op :system/web (opts kvs)))
+(defn web!
+  "Change the web remote: :enabled bool, :lan bool, :port 1024..65535."
+  [& kvs]
+  (f/op :system/web (opts kvs)))
 (defn replace-web-key! [] (f/op :system/web-replace-key))
 
 ;; Window, view, shortcuts
@@ -99,12 +115,16 @@
 (defn workspace [] (f/op :system/workspace))
 (defn workspace! [ws] (f/op :system/workspace {:name (nm ws)}))
 (defn tours [] (f/op :system/tours))
-(defn tour! [t] (f/op :system/tour (target t)))
+(defn tour [] (f/op :system/tour))
+(defn tour!
+  "Start tour `t` (index or name); (tour! :end) ends the one showing."
+  [t]
+  (f/op :system/tour (if (= t :end) {:end true} (target t))))
 (defn escape! [] (f/op :system/escape))
 (defn quit!
-  "Show the quit dialog; (quit! :confirm) quits."
+  "Show the quit dialog; (quit! :confirm) quits, (quit! :cancel) closes the dialog."
   ([] (f/op :system/quit))
-  ([confirm] (f/op :system/quit {:confirm (= confirm :confirm)})))
+  ([how] (f/op :system/quit (if (= how :cancel) {:cancel true} {:confirm (= how :confirm)}))))
 
 ;; Triggers
 (defn triggers [] (f/op :system/triggers))

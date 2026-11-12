@@ -38,8 +38,25 @@ them are already required in `user`:
 | `particle` | particle simulation, sources, obstacles, morph targets, lattice and helix, volumetric look, quality |
 | `svg` | the SVG Offset layer: its SVG file (or the built-in ornament), reload, quality, background, offset, rotation, keyer |
 | `trama` | effect chains on each layer and on the master: nodes, wires, params, modulation, bypass, import and export |
-| `bind` | the Binding Matrix, LFOs and templates, audio input, MIDI and OSC mappings |
-| `sys` | tempo and Link, recording, outputs, output window, settings, theme, overlay, triggers, quit |
+| `bind` | the Binding Matrix, LFOs and templates, audio input, MIDI and OSC mappings, the OSC listener and sender |
+| `sys` | tempo and Link, recording, outputs, output window, settings, themes and theme files, interface scale, web remote, tours, overlay, triggers, quit |
+
+Setup and Appearance ops:
+
+| op | REPL | what it does |
+|---|---|---|
+| `bindings/osc-config` | `(bind/osc-config! :port 9000 :lan true)` | the OSC listener: port, other devices, on/off; restarts it |
+| `bindings/osc-send` | `(bind/osc-send! :enabled true :host "10.0.0.5" :port 9001 :rate 30 :prefix :fosfora)` | sending the analysis to another app |
+| `system/web` | `(sys/web! :port 9090 :lan false)` | the web remote; a new port restarts it |
+| `system/ui-scale` | `(sys/ui-scale! 1.25)` | interface scale, 0.8 to 2.0 |
+| `system/theme-reload` | `(sys/reload-themes!)` | read the themes folder again |
+| `system/theme-save-copy` | `(sys/save-theme-copy!)` | save the theme in use as a file to edit, and use it |
+| `system/theme-folder` | `(sys/theme-folder)`, `(sys/open-theme-folder!)` | where theme files live; open it |
+| `system/tour` | `(sys/tour! "layers")`, `(sys/tour! :end)`, `(sys/tour)` | start, end or read the guided tour |
+| `system/quit` | `(sys/quit!)`, `(sys/quit! :confirm)`, `(sys/quit! :cancel)` | the quit dialog |
+
+Ports take 1024 to 65535. Without arguments, each of these ops reports the
+current value and changes nothing.
 
 Anything that picks one item takes an index or a name. A name can be any
 unique part of it, in any case.

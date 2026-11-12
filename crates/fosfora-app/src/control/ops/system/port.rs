@@ -69,8 +69,23 @@ pub trait SettingsPort {
     fn set_theme(&mut self, index: usize);
     fn web_status(&self) -> WebStatus;
     fn set_web(&mut self, enabled: Option<bool>, lan: Option<bool>);
+    /// Serve the web remote on `port` (saved); restarts it.
+    fn set_web_port(&mut self, port: u16);
     /// New access key; every connected device drops.
     fn replace_web_key(&mut self);
+    /// The interface scale in use (1.0 = 100 %).
+    fn ui_scale(&self) -> f32;
+    /// Rescale the interface (the Appearance slider; applied and saved by
+    /// the next frame).
+    fn set_ui_scale(&mut self, scale: f32);
+    /// Read the themes folder again.
+    fn reload_themes(&mut self);
+    /// Save the theme in use as a new file and use it; its name.
+    fn save_theme_copy(&mut self) -> Result<String, String>;
+    /// Where theme files live.
+    fn themes_folder(&self) -> PathBuf;
+    /// Show the themes folder in the system file browser.
+    fn open_themes_folder(&mut self) -> Result<(), String>;
 }
 
 /// The window, its modals, the shortcuts and quitting.
@@ -82,11 +97,19 @@ pub trait ShellPort {
     fn set_chain_editor_open(&mut self, open: bool);
     fn set_workspace(&mut self, ws: Workspace);
     fn tour_names(&self) -> Vec<String>;
+    /// Per tour, whether it was finished or skipped (Setup › Tutorials' "taken").
+    fn tours_taken(&self) -> Vec<bool>;
+    /// The tour showing and its step.
+    fn current_tour(&self) -> Option<(usize, usize)>;
     fn start_tour(&mut self, index: usize);
+    /// Stop the tour showing, as Skip tour does; it counts as taken.
+    fn end_tour(&mut self);
     /// One step of the Escape key's ladder; what it did.
     fn escape(&mut self) -> &'static str;
     /// Show the quit dialog, or with `confirm` quit at the end of the frame.
     fn request_quit(&mut self, confirm: bool);
+    /// The quit dialog's Cancel.
+    fn cancel_quit(&mut self);
     /// What a MIDI/OSC/web trigger does.
     fn run_trigger(&mut self, action: TriggerAction);
 }
@@ -259,6 +282,35 @@ impl SettingsPort for App {
     fn replace_web_key(&mut self) {
         self.web.replace_access_key();
     }
+
+    fn set_web_port(&mut self, port: u16) {
+        self.web.set_port(port);
+    }
+
+    fn ui_scale(&self) -> f32 {
+        self.settings.ui_scale
+    }
+
+    fn set_ui_scale(&mut self, scale: f32) {
+        self.request_ui_scale(scale);
+    }
+
+    fn reload_themes(&mut self) {
+        App::reload_themes(self);
+    }
+
+    fn save_theme_copy(&mut self) -> Result<String, String> {
+        let theme = App::save_theme_copy(self)?;
+        Ok(theme.display_name(&self.custom_themes))
+    }
+
+    fn themes_folder(&self) -> PathBuf {
+        crate::ui::theme::custom::themes_dir()
+    }
+
+    fn open_themes_folder(&mut self) -> Result<(), String> {
+        App::open_themes_folder(self).map(|_| ())
+    }
 }
 
 impl ShellPort for App {
@@ -307,10 +359,28 @@ impl ShellPort for App {
         crate::ui::tour::Tour::ALL.iter().map(|t| t.name().to_string()).collect()
     }
 
+    fn tours_taken(&self) -> Vec<bool> {
+        let done = &self.settings.tours_done;
+        crate::ui::tour::Tour::ALL
+            .iter()
+            .map(|t| done.iter().any(|k| k == t.key()))
+            .collect()
+    }
+
+    fn current_tour(&self) -> Option<(usize, usize)> {
+        use crate::ui::tour::{Tour, current};
+        let (tour, step) = current(&self.egui_overlay.context())?;
+        Tour::ALL.iter().position(|&t| t == tour).map(|i| (i, step))
+    }
+
     fn start_tour(&mut self, index: usize) {
         if let Some(&t) = crate::ui::tour::Tour::ALL.get(index) {
             crate::ui::tour::start(&self.egui_overlay.context(), t);
         }
+    }
+
+    fn end_tour(&mut self) {
+        crate::ui::tour::end(&self.egui_overlay.context());
     }
 
     fn escape(&mut self) -> &'static str {
@@ -319,6 +389,10 @@ impl ShellPort for App {
 
     fn request_quit(&mut self, confirm: bool) {
         App::request_quit(self, confirm);
+    }
+
+    fn cancel_quit(&mut self) {
+        App::cancel_quit(self);
     }
 
     fn run_trigger(&mut self, action: TriggerAction) {

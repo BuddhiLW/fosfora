@@ -100,6 +100,22 @@ pub struct MappingRow {
     pub source: MappingSource,
 }
 
+/// The OSC listener and sender settings, as Setup › Control shows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OscSettings {
+    pub enabled: bool,
+    pub rx_port: u16,
+    pub rx_lan: bool,
+    /// A message arrived in the last 300 ms.
+    pub active: bool,
+    pub last_address: Option<String>,
+    pub tx_enabled: bool,
+    pub tx_host: String,
+    pub tx_port: u16,
+    pub tx_rate_hz: u32,
+    pub tx_prefix: String,
+}
+
 // ── Ports ──────────────────────────────────────────────────────────────────
 
 /// The Binding Matrix slice of the app. Bindings are addressed by id.
@@ -164,4 +180,19 @@ pub trait MappingPort {
     fn set_mapping_learn(&mut self, proto: Proto, target: Option<MapTarget>);
     /// Remove the mapping for `target`; whether there was one.
     fn clear_mapping(&mut self, proto: Proto, target: &MapTarget) -> bool;
+}
+
+/// The OSC network slice of the app: where it listens, where it sends. Every
+/// setter applies live and persists, as the Setup page does.
+pub trait OscNetPort {
+    fn osc_settings(&self) -> OscSettings;
+    fn set_osc_enabled(&mut self, on: bool);
+    /// Listen on `port`; restarts the listener.
+    fn set_osc_rx_port(&mut self, port: u16);
+    /// Receive from other devices, or this computer only; restarts the listener.
+    fn set_osc_rx_lan(&mut self, lan: bool);
+    fn set_osc_tx_enabled(&mut self, on: bool);
+    fn set_osc_tx_target(&mut self, host: &str, port: u16);
+    fn set_osc_tx_rate(&mut self, hz: u32);
+    fn set_osc_tx_prefix(&mut self, prefix: &str);
 }
