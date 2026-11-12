@@ -335,3 +335,30 @@ fn system_reads_and_a_reversible_view_toggle_over_nrepl() {
     let e = repl.eval("(sys/trigger! :explode)").unwrap_err();
     assert!(e.contains("next-effect"), "{e}");
 }
+
+#[test]
+fn the_svg_namespace_reads_and_restores_an_svg_offset_layer_over_nrepl() {
+    let Some(mut repl) = live() else {
+        eprintln!("skipped: FOSFORA_IT_NREPL not set");
+        return;
+    };
+    let names = repl.eval("(mapv :name (f/ops \"svg/\"))").unwrap();
+    for op in ["svg/state", "svg/set", "svg/load", "svg/reload"] {
+        assert!(names.contains(op), "{op} missing from {names}");
+    }
+    // Most layers are not SVG Offset; that is the app's answer, not a failure.
+    let state = repl.eval("(svg/state)");
+    let Ok(state) = state else {
+        let e = state.unwrap_err();
+        assert!(e.contains("no SVG Offset"), "{e}");
+        return;
+    };
+    assert!(state.contains(":shapes"), "{state}");
+    let e = repl.eval("(svg/settings! :rotation 999)").unwrap_err();
+    assert!(e.contains("rotation"), "{e}");
+    // Reversible: settings only, no reload, put back as they were.
+    let before = repl.eval("(:rotation (svg/state))").unwrap();
+    assert_eq!(repl.eval("(:rotation (svg/rotate! 12.5))").unwrap(), "12.5");
+    repl.eval(&format!("(svg/rotate! {before})")).unwrap();
+    assert_eq!(repl.eval("(:rotation (svg/state))").unwrap(), before);
+}

@@ -2274,41 +2274,11 @@ impl ApplicationHandler for FosforaApp {
                         .context()
                         .data_mut(|d| d.remove_temp(egui::Id::new("svg_offset_cmd")));
                     if let Some(cmd) = cmd {
-                        if let Some(layer) = app.layer_stack.active_mut() {
-                            if let Some(e) = layer.as_effect_mut() {
-                                if let Some(svg) = &mut e.pass_executor.svg_offset {
-                                    let result = if cmd.reload {
-                                        svg.reload(
-                                            &app.gpu.device,
-                                            &app.gpu.queue,
-                                            cmd.path.as_deref(),
-                                            cmd.settings,
-                                            svg.output_size()[0],
-                                            svg.output_size()[1],
-                                        )
-                                    } else {
-                                        svg.settings = cmd.settings;
-                                        Ok(())
-                                    };
-                                    match result {
-                                        Ok(()) => {
-                                            e.shader_error = None;
-                                            app.preset_store.mark_dirty();
-                                        }
-                                        Err(err) => {
-                                            log::error!("SVG load: {err}");
-                                            e.shader_error = Some(err);
-                                        }
-                                    }
-                                    e.pass_executor.rebuild_all_bind_groups(
-                                        &app.gpu.device,
-                                        &e.uniform_buffer,
-                                        &app.placeholder,
-                                        &app.audio_textures,
-                                    );
-                                }
-                            }
-                        }
+                        let layer = app.layer_stack.active_layer;
+                        // A failed load is already logged and shown as the
+                        // layer's shader error; a layer without SVG Offset
+                        // ignores the command, as before.
+                        let _ = app.apply_svg_offset_command(layer, cmd);
                     }
                 }
 

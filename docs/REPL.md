@@ -36,6 +36,7 @@ them are already required in `user`:
 | `scene` | the scene library and its cue timeline: save, open, play, cues, advance, loop |
 | `layer` | the stack, effects, params (real units or normalized), opacity, blend, media transport, cameras, post-processing |
 | `particle` | particle simulation, sources, obstacles, morph targets, lattice and helix, volumetric look, quality |
+| `svg` | the SVG Offset layer: its SVG file (or the built-in ornament), reload, quality, background, offset, rotation, keyer |
 | `trama` | effect chains on each layer and on the master: nodes, wires, params, modulation, bypass, import and export |
 | `bind` | the Binding Matrix, LFOs and templates, audio input, MIDI and OSC mappings |
 | `sys` | tempo and Link, recording, outputs, output window, settings, theme, overlay, triggers, quit |
@@ -53,6 +54,9 @@ unique part of it, in any case.
 (layer/load! "Sumi" :layer 2)
 (layer/set-param! :speed 2.5)                ; refused outside the param's range
 (layer/blend! 0 :screen)
+(svg/load! "~/art/logo.svg")                 ; on an SVG Offset layer; no path = built-in ornament
+(svg/settings! :quality :half :background :black :rotation 45)
+(svg/keyer! :width 0.5 :repeats 4)
 (def k (trama/add! "kaleido" :chain 0))
 (trama/connect! "layer-input" (:id k) :chain 0)
 (trama/connect! (:id k) "output" :chain 0)

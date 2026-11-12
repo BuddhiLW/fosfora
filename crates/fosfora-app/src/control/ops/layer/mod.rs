@@ -421,6 +421,7 @@ pub fn filter_effects(
 
 fn type_name(def: &ParamDef) -> &'static str {
     match def {
+        ParamDef::Int { .. } => "int",
         ParamDef::Float { .. } => "float",
         ParamDef::Color { .. } => "color",
         ParamDef::Bool { .. } => "bool",
@@ -523,6 +524,11 @@ fn components<const N: usize>(v: &Value, what: &str) -> Result<[f32; N], String>
 pub fn promote_param(def: &ParamDef, raw: &Value, normalized: bool) -> Result<ParamValue, String> {
     let what = def.name();
     match def {
+        // Stored as f32 like every scalar (see `ParamDef::default_value`), rounded.
+        #[allow(clippy::cast_precision_loss)]
+        ParamDef::Int { min, max, .. } => Ok(ParamValue::Float(
+            ranged(num_in(raw, what)?, *min as f32, *max as f32, normalized, what)?.round(),
+        )),
         ParamDef::Float { min, max, .. } => {
             Ok(ParamValue::Float(ranged(num_in(raw, what)?, *min, *max, normalized, what)?))
         }

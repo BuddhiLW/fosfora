@@ -23,6 +23,7 @@ pub mod layer;
 pub mod particle;
 pub mod preset;
 pub mod scene;
+pub mod svg;
 pub mod system;
 pub mod trama;
 
@@ -34,6 +35,7 @@ pub fn builtin_addons() -> Vec<Box<dyn ControlAddon<App>>> {
         Box::new(scene::Addon),
         Box::new(layer::Addon),
         Box::new(particle::Addon),
+        Box::new(svg::Addon),
         Box::new(trama::Addon),
         Box::new(bindings::Addon),
         Box::new(system::Addon),
