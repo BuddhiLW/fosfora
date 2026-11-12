@@ -21,7 +21,31 @@ fn every_op_is_namespaced_and_every_claimed_signal_maps_to_one() {
     for (signal, op) in signals {
         assert!(names.contains(op), "{signal} -> {op} is not registered");
     }
-    assert_eq!(signals.len(), 38);
+    assert_eq!(signals.len(), 39);
+}
+
+fn loading(name: &str, index: usize) -> crate::gpu::particle::source_loader::SourceLoading {
+    crate::gpu::particle::source_loader::SourceLoading { index, name: name.into(), done: 3, total: 10, secs: 0.5 }
+}
+
+#[test]
+fn cancel_load_picks_by_index_or_name_and_needs_a_pick_when_several_run() {
+    let mut s = Stub::new();
+    assert!(s.call("particle/cancel-load", json!({})).unwrap_err().contains("no particle source"));
+    s.loads = vec![loading("waves.mp4", 0), loading("cat.png", 1), loading("dog.png", 2)];
+    assert_eq!(s.call("particle/loading", json!({})).unwrap().as_array().unwrap().len(), 3);
+    assert!(s.call("particle/cancel-load", json!({})).unwrap_err().contains("give :load"));
+    assert!(s.call("particle/cancel-load", json!({"load": "png"})).is_err(), "ambiguous");
+    assert!(s.call("particle/cancel-load", json!({"load": 7})).is_err());
+    assert!(s.call("particle/cancel-load", json!({"load": true})).is_err());
+    assert_eq!(s.loads.len(), 3, "refusals cancel nothing");
+    let r = s.call("particle/cancel-load", json!({"load": "cat"})).unwrap();
+    assert_eq!(r["name"], "cat.png");
+    let r = s.call("particle/cancel-load", json!({"load": 0})).unwrap();
+    assert_eq!(r["name"], "waves.mp4");
+    let r = s.call("particle/cancel-load", json!({})).unwrap();
+    assert_eq!(r["name"], "dog.png");
+    assert!(s.loads.is_empty());
 }
 
 #[test]

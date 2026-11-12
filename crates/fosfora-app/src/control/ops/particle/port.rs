@@ -13,6 +13,7 @@ use super::model::{
 use crate::app::App;
 use crate::gpu::helix::HelixParams;
 use crate::gpu::lattice::LatticeParams;
+pub use crate::gpu::particle::source_loader::SourceLoading;
 use crate::gpu::particle::types::ModelSampleDef;
 use crate::gpu::volumetric::VolumetricParams;
 use crate::settings::ParticleQuality;
@@ -55,6 +56,10 @@ pub trait ParticleSourcePort: ParticleLayers {
     fn splat_state(&self, layer: usize) -> Option<SplatState>;
     fn splat_load(&mut self, layer: usize, path: Option<PathBuf>) -> Result<(), String>;
     fn splat_download_demo(&mut self) -> Result<(), String>;
+    /// Every source load in flight (any layer), in list order.
+    fn source_loads(&self) -> Vec<SourceLoading>;
+    /// Stop load `index` of [`Self::source_loads`] (the panel's Cancel).
+    fn cancel_source_load(&mut self, index: usize) -> Result<(), String>;
 }
 
 /// The obstacle a particle system collides with.
@@ -228,6 +233,19 @@ impl ParticleSourcePort for App {
 
     fn splat_download_demo(&mut self) -> Result<(), String> {
         App::splat_download_demo(self)
+    }
+
+    fn source_loads(&self) -> Vec<SourceLoading> {
+        self.particle_source_loader.loads()
+    }
+
+    fn cancel_source_load(&mut self, index: usize) -> Result<(), String> {
+        let len = self.particle_source_loader.loads().len();
+        if index >= len {
+            return Err(format!("source load {index} out of range (have {len})"));
+        }
+        self.particle_source_loader.cancel(index);
+        Ok(())
     }
 }
 

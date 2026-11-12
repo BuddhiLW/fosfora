@@ -92,6 +92,16 @@ pub struct TransportEdit {
     pub seek_secs: Option<f64>,
 }
 
+/// A media file still decoding for a new layer, as the media panel shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaLoadView {
+    pub file: String,
+    /// Frames decoded, and how many the probe expects (0 = not known yet).
+    pub done: u32,
+    pub total: u32,
+    pub secs: f32,
+}
+
 /// The cameras to pick from.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WebcamList {
@@ -111,6 +121,8 @@ pub trait StackPort {
     fn active_layer(&self) -> usize;
     /// Add an empty layer and select it; its index.
     fn add_layer(&mut self) -> Result<usize, String>;
+    /// Add an empty layer at position `at` (`0..=len`) and select it; `at`.
+    fn insert_layer(&mut self, at: usize) -> Result<usize, String>;
     fn remove_layer(&mut self, index: usize) -> Result<(), String>;
     /// Back to the launch stack (Clear stack).
     fn clear_layers(&mut self);
@@ -138,6 +150,9 @@ pub trait EffectPort {
     fn open_shader_editor(&mut self, layer: usize) -> Result<String, String>;
     /// Write the editor's dirty tabs; the paths written.
     fn save_shader_editor(&mut self) -> Result<Vec<String>, String>;
+    /// The WGSL layer `layer` runs, one source per pass; `None` when it is
+    /// not an effect layer.
+    fn shader_sources(&self, layer: usize) -> Option<Vec<String>>;
 }
 
 /// A layer's effect params (base values, not binding modulation).
@@ -153,6 +168,10 @@ pub trait ParamPort {
 pub trait MediaPort {
     /// Start decoding `path` into a new media layer (it appears when ready).
     fn add_media(&mut self, path: &str) -> Result<(), String>;
+    /// The files still decoding into new layers, in list order.
+    fn media_loads(&self) -> Vec<MediaLoadView>;
+    /// Stop decoding load `index` of [`Self::media_loads`] (the panel's Cancel).
+    fn cancel_media(&mut self, index: usize) -> Result<(), String>;
     /// `None` when `layer` is not a media layer.
     fn transport(&self, layer: usize) -> Option<TransportView>;
     fn edit_transport(&mut self, layer: usize, edit: &TransportEdit) -> Result<(), String>;
@@ -229,6 +248,10 @@ impl StackPort for App {
         self.layer_add()
     }
 
+    fn insert_layer(&mut self, at: usize) -> Result<usize, String> {
+        self.layer_insert(at)
+    }
+
     fn remove_layer(&mut self, index: usize) -> Result<(), String> {
         self.layer_remove(index)
     }
@@ -294,6 +317,11 @@ impl EffectPort for App {
         self.shader_editor_save()
             .map(|ps| ps.iter().map(|p| p.display().to_string()).collect())
     }
+
+    fn shader_sources(&self, layer: usize) -> Option<Vec<String>> {
+        let effect = self.layer_stack.layers.get(layer)?.as_effect()?;
+        Some(effect.shader_sources.clone())
+    }
 }
 
 impl ParamPort for App {
@@ -331,6 +359,28 @@ impl ParamPort for App {
 impl MediaPort for App {
     fn add_media(&mut self, path: &str) -> Result<(), String> {
         self.media_add(std::path::PathBuf::from(path))
+    }
+
+    fn media_loads(&self) -> Vec<MediaLoadView> {
+        self.media_loads
+            .iter()
+            .map(crate::ui::panels::media_panel::MediaLoading::of)
+            .map(|m| MediaLoadView {
+                file: m.file_name,
+                done: m.done,
+                total: m.total,
+                secs: m.secs,
+            })
+            .collect()
+    }
+
+    fn cancel_media(&mut self, index: usize) -> Result<(), String> {
+        let len = self.media_loads.len();
+        if index >= len {
+            return Err(format!("media load {index} out of range (have {len})"));
+        }
+        self.cancel_media_load(index);
+        Ok(())
     }
 
     fn transport(&self, layer: usize) -> Option<TransportView> {

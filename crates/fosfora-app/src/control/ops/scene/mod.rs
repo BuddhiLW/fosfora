@@ -95,6 +95,10 @@ impl<C: ScenePort + CuePort + 'static> ControlAddon<C> for Addon {
             ("scene_set_loop", "scene/timeline"),
             ("scene_set_advance_mode", "scene/timeline"),
             ("scene_set_beats_per_cue", "scene/timeline"),
+            ("scene_insert_cue", "scene/add-cue"),
+            ("scene_move_cue", "scene/move-cue"),
+            ("scene_set_cue_label", "scene/set-cue"),
+            ("scene_clear_cue_hold", "scene/set-cue"),
         ]
     }
 

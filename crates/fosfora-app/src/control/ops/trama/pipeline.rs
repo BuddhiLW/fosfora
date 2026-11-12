@@ -347,7 +347,6 @@ fn floats(v: &Value, n: usize) -> Option<Vec<f32>> {
 
 fn type_hint(def: &ParamDef) -> &'static str {
     match def {
-        ParamDef::Int { .. } => "a whole number",
         ParamDef::Float { .. } => "a number",
         ParamDef::Int { .. } => "an integer",
         ParamDef::Bool { .. } => "true or false",
@@ -359,7 +358,6 @@ fn type_hint(def: &ParamDef) -> &'static str {
 /// `v` as a value for `def`, refusing a wrong shape or a non-finite number.
 pub fn param_value(def: &ParamDef, v: &Value) -> Result<ParamValue, String> {
     let value = match def {
-        ParamDef::Int { .. } => v.as_f64().map(|f| ParamValue::Float(f.round() as f32)),
         ParamDef::Float { .. } => v.as_f64().map(|f| ParamValue::Float(f as f32)),
         ParamDef::Int { min, max, .. } => v
             .as_f64()
