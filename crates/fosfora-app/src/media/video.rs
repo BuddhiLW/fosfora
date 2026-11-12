@@ -9,8 +9,9 @@
 
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, OnceLock};
 
 use super::ffmpeg_stderr::{spawn_tail, zero_frames_error};
 use super::predecode_budget::{
@@ -155,8 +156,15 @@ pub fn decode_all_frames(
         .spawn()
         .map_err(|e| PredecodeError::Failed(format!("Failed to spawn ffmpeg: {e}")))?;
     let stderr_tail = spawn_tail(child.stderr.take());
-    let finish = |child: &mut std::process::Child| {
-        let status = child.wait().ok();
+    let stdout = child.stdout.take();
+    let child = Mutex::new(child);
+    let kill = |child: &Mutex<Child>| {
+        if let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+        }
+    };
+    let finish = |child: &Mutex<Child>| {
+        let status = child.lock().ok().and_then(|mut c| c.wait().ok());
         let text = stderr_tail.and_then(|h| h.join().ok()).unwrap_or_default();
         (status, text)
     };
@@ -165,9 +173,9 @@ pub fn decode_all_frames(
         est_frames.min(u64::from(u32::MAX)) as u32,
         Ordering::Relaxed,
     );
-    let Some(mut stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = finish(&mut child);
+    let Some(mut stdout) = stdout else {
+        kill(&child);
+        let _ = finish(&child);
         return Err(PredecodeError::Failed("ffmpeg: no stdout pipe".into()));
     };
 
@@ -176,32 +184,61 @@ pub fn decode_all_frames(
     let mut delays_ms = Vec::with_capacity(reserve);
     let mut buf = vec![0u8; frame_size];
 
-    while stdout.read_exact(&mut buf).is_ok() {
-        if progress.cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = finish(&mut child);
+    let done = AtomicBool::new(false);
+    let stop = std::thread::scope(|s| {
+        // Without the watcher a cancel is seen only when the next frame
+        // arrives, which for a stalled ffmpeg is never.
+        let _ = std::thread::Builder::new()
+            .name("ffmpeg-cancel".into())
+            .spawn_scoped(s, || watch_cancel(&child, &progress.cancel, &done));
+        let stop = loop {
+            if stdout.read_exact(&mut buf).is_err() {
+                break Stop::End;
+            }
+            if progress.cancel.load(Ordering::Relaxed) {
+                break Stop::Cancelled;
+            }
+            if frames.len() as u64 >= budget_frames {
+                break Stop::OverBudget;
+            }
+            frames.push(DecodedFrame {
+                data: buf.clone(),
+                width: meta.width,
+                height: meta.height,
+            });
+            delays_ms.push(delay_ms.max(1));
+            progress.done.fetch_add(1, Ordering::Relaxed);
+        };
+        done.store(true, Ordering::Relaxed);
+        stop
+    });
+    drop(stdout);
+
+    // A cancel that killed ffmpeg ends the read like an end of file.
+    let stop = if progress.cancel.load(Ordering::Relaxed) {
+        Stop::Cancelled
+    } else {
+        stop
+    };
+    match stop {
+        Stop::End => {}
+        Stop::Cancelled => {
+            kill(&child);
+            let _ = finish(&child);
             return Err(PredecodeError::Failed("cancelled".to_string()));
         }
-        if frames.len() as u64 >= budget_frames {
-            let _ = child.kill();
-            let _ = finish(&mut child);
+        Stop::OverBudget => {
+            kill(&child);
+            let _ = finish(&child);
             return Err(PredecodeError::OverBudget(format!(
                 "pre-decoding went past the {} MiB budget at frame {} ({PREDECODE_MAX_MB_ENV})",
                 budget_bytes >> 20,
                 frames.len() + 1,
             )));
         }
-        frames.push(DecodedFrame {
-            data: buf.clone(),
-            width: meta.width,
-            height: meta.height,
-        });
-        delays_ms.push(delay_ms.max(1));
-        progress.done.fetch_add(1, Ordering::Relaxed);
     }
-    drop(stdout);
 
-    let (status, stderr) = finish(&mut child);
+    let (status, stderr) = finish(&child);
     let exit_code = status.and_then(|s| s.code());
     if frames.is_empty() {
         return Err(PredecodeError::Failed(zero_frames_error(
@@ -222,6 +259,32 @@ pub fn decode_all_frames(
     );
 
     Ok((frames, delays_ms))
+}
+
+/// Why the pre-decode read loop stopped.
+enum Stop {
+    End,
+    Cancelled,
+    OverBudget,
+}
+
+/// How often the cancel watcher looks at the flag.
+const CANCEL_POLL: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Kill `child` as soon as `cancel` is set, until `done`. The read loop
+/// checks `cancel` only between frames, so a stalled or slow ffmpeg would
+/// otherwise keep the decode (and the frames it holds) alive.
+fn watch_cancel(child: &Mutex<Child>, cancel: &AtomicBool, done: &AtomicBool) {
+    use std::sync::atomic::Ordering;
+    while !done.load(Ordering::Relaxed) {
+        if cancel.load(Ordering::Relaxed) {
+            if let Ok(mut c) = child.lock() {
+                let _ = c.kill();
+            }
+            return;
+        }
+        std::thread::sleep(CANCEL_POLL);
+    }
 }
 
 /// Everything a video source needs, in one call: the ffmpeg check, the probe,
