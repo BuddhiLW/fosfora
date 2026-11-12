@@ -120,21 +120,30 @@ pub fn load_media_with(path: &Path, progress: &MediaProgress) -> Result<MediaSou
     }
 }
 
-/// Load a video file: a clip up to [`MAX_PREDECODE_SECS`] is pre-decoded
-/// for instant scrubbing, a longer one streams as it plays (#3094).
+/// Load a video file: a clip up to [`MAX_PREDECODE_SECS`] whose frames fit
+/// the pre-decode RAM budget is pre-decoded for instant scrubbing; anything
+/// longer or larger streams as it plays (#3094).
 #[cfg(feature = "video")]
 fn load_video(path: &Path, progress: &MediaProgress) -> Result<MediaSource, String> {
-    load_video_with_cap(path, progress, super::video::MAX_PREDECODE_SECS)
+    load_video_with_cap(
+        path,
+        progress,
+        super::video::MAX_PREDECODE_SECS,
+        super::predecode_budget::predecode_budget_bytes(),
+    )
 }
 
-/// [`load_video`] with the pre-decode limit as a parameter.
+/// [`load_video`] with the pre-decode limits as parameters.
 #[cfg(feature = "video")]
-fn load_video_with_cap(
+pub(crate) fn load_video_with_cap(
     path: &Path,
     progress: &MediaProgress,
     max_predecode_secs: f64,
+    budget_bytes: u64,
 ) -> Result<MediaSource, String> {
+    use super::predecode_budget::{PredecodeError, predecode_refusal};
     use super::video::{decode_all_frames, ffmpeg_available, probe_video};
+    use super::video_stream::VideoStream;
 
     if !ffmpeg_available() {
         return Err("ffmpeg/ffprobe not found on PATH".to_string());
@@ -147,19 +156,23 @@ fn load_video_with_cap(
         meta.fps,
         meta.duration_secs,
     );
-    if meta.duration_secs > max_predecode_secs {
-        log::info!(
-            "Streaming the video rather than pre-decoding {:.0} s of frames",
-            meta.duration_secs
-        );
-        return super::video_stream::VideoStream::open(path, meta).map(MediaSource::Streaming);
+    if let Some(why) = predecode_refusal(&meta, max_predecode_secs, budget_bytes) {
+        log::info!("Streaming the video rather than pre-decoding it: {why}");
+        return VideoStream::open(path, meta).map(MediaSource::Streaming);
     }
-    let (frames, delays_ms) = decode_all_frames(path, &meta, progress)?;
-    Ok(MediaSource::Animated {
-        frames,
-        delays_ms,
-        from_video: true,
-    })
+    match decode_all_frames(path, &meta, progress, budget_bytes) {
+        Ok((frames, delays_ms)) => Ok(MediaSource::Animated {
+            frames,
+            delays_ms,
+            from_video: true,
+        }),
+        Err(PredecodeError::OverBudget(why)) => {
+            log::warn!("Streaming the video instead: {why}");
+            progress.done.store(0, std::sync::atomic::Ordering::Relaxed);
+            VideoStream::open(path, meta).map(MediaSource::Streaming)
+        }
+        Err(PredecodeError::Failed(e)) => Err(e),
+    }
 }
 
 /// Load a static image (PNG, JPEG, etc.) via the `image` crate.
@@ -425,7 +438,7 @@ mod tests {
             return;
         };
         let progress = MediaProgress::default();
-        let source = load_video_with_cap(&path, &progress, 0.5).expect("streams");
+        let source = load_video_with_cap(&path, &progress, 0.5, u64::MAX).expect("streams");
         assert!(matches!(source, MediaSource::Streaming(_)));
         assert!(source.is_video() && source.is_animated());
         assert_eq!(source.frame_count(), 20);

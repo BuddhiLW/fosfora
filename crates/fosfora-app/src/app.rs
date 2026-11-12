@@ -2320,6 +2320,15 @@ impl App {
     /// layer appears when the decode finishes ([`Self::poll_media_loads`]);
     /// until then [`Self::media_loads`] says how far it has got.
     pub fn start_media_layer(&mut self, path: std::path::PathBuf) {
+        use crate::media::same_file::same_media_file;
+        if self
+            .media_loads
+            .iter()
+            .any(|l| same_media_file(&l.path, &path))
+        {
+            log::info!("Already loading {}", path.display());
+            return;
+        }
         let max = crate::bindings::catalog::MAX_LAYERS;
         if self.layer_stack.layers.len() + self.media_loads.len() >= max {
             log::warn!("Maximum {max} layers reached");

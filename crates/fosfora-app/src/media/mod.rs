@@ -1,8 +1,15 @@
 pub mod decoder;
 #[cfg(feature = "video")]
+pub mod ffmpeg_stderr;
+#[cfg(feature = "video")]
 pub mod hwaccel;
 pub mod pack;
 pub mod pack_watch;
+#[cfg(feature = "video")]
+pub mod predecode_budget;
+#[cfg(all(test, feature = "video"))]
+mod predecode_tests;
+pub mod same_file;
 #[cfg(feature = "webcam")]
 pub mod stream;
 pub mod types;

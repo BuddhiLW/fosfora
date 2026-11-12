@@ -3,13 +3,20 @@
 //! - `ffprobe` probes metadata (dimensions, fps, duration) synchronously at load time
 //! - `ffmpeg -f rawvideo -pix_fmt rgba` decodes ALL frames to memory in one pass
 //! - Returns `MediaSource::Animated` — identical to GIF, instant random access
-//! - RAM cost: ~3.7MB per frame at 1280x720. A 30s@30fps clip = ~3.3GB.
+//! - RAM cost: ~3.7MB per frame at 1280x720. A 30s@30fps clip = ~3.3GB, so a
+//!   clip is pre-decoded only within the `predecode_budget` byte budget; past it the
+//!   media layer streams instead (`decoder::load_video`).
 
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, OnceLock};
 
+use super::ffmpeg_stderr::{spawn_tail, zero_frames_error};
+use super::predecode_budget::{
+    PREDECODE_MAX_MB_ENV, PredecodeError, predecode_budget_bytes, predecode_refusal,
+};
 use super::types::DecodedFrame;
 
 /// Check if ffmpeg/ffprobe are available on the system. Cached per process.
@@ -103,27 +110,33 @@ fn parse_frame_rate(rate: &str) -> f64 {
     }
 }
 
-/// Pre-decode all video frames via a single ffmpeg run.
+/// Maximum video duration (seconds) we'll pre-decode. Beyond this, reject.
+pub const MAX_PREDECODE_SECS: f64 = 60.0;
+
+/// Pre-decode all video frames via a single ffmpeg run, stopping once they
+/// would take more than `budget_bytes`.
 /// Returns (frames, delays_ms) ready for `MediaSource::Animated`.
 pub fn decode_all_frames(
     path: &Path,
     meta: &VideoMeta,
     progress: &super::decoder::MediaProgress,
-) -> Result<(Vec<DecodedFrame>, Vec<u32>), String> {
+    budget_bytes: u64,
+) -> Result<(Vec<DecodedFrame>, Vec<u32>), PredecodeError> {
     use std::sync::atomic::Ordering;
-    let frame_size = (meta.width as usize) * (meta.height as usize) * 4;
+    let frame_bytes = meta.frame_bytes();
+    let frame_size = frame_bytes as usize;
     let delay_ms = (1000.0 / meta.fps).round() as u32;
-
-    // Estimate RAM and warn
-    let est_frames = (meta.duration_secs * meta.fps).ceil() as usize;
-    let est_ram_mb = (est_frames * frame_size) / (1024 * 1024);
+    let est_frames = meta.estimated_frames();
+    let budget_frames = budget_bytes / frame_bytes.max(1);
     log::info!(
-        "Pre-decoding video: ~{} frames, ~{}MB RAM",
+        "Pre-decoding video: ~{} frames, ~{}MB RAM (budget {}MB)",
         est_frames,
-        est_ram_mb,
+        meta.estimated_predecode_bytes() >> 20,
+        budget_bytes >> 20,
     );
 
     let mut child = Command::new("ffmpeg")
+        .args(["-v", "error"])
         .args(super::hwaccel::input_args())
         .args(["-i"])
         .arg(path)
@@ -135,57 +148,144 @@ pub fn decode_all_frames(
             "rgba",
             "-s",
             &format!("{}x{}", meta.width, meta.height),
-            "-v",
-            "quiet",
             "pipe:1",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn ffmpeg: {e}"))?;
+        .map_err(|e| PredecodeError::Failed(format!("Failed to spawn ffmpeg: {e}")))?;
+    let stderr_tail = spawn_tail(child.stderr.take());
+    let stdout = child.stdout.take();
+    let child = Mutex::new(child);
+    let kill = |child: &Mutex<Child>| {
+        if let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+        }
+    };
+    let finish = |child: &Mutex<Child>| {
+        let status = child.lock().ok().and_then(|mut c| c.wait().ok());
+        let text = stderr_tail.and_then(|h| h.join().ok()).unwrap_or_default();
+        (status, text)
+    };
 
-    progress
-        .total
-        .store(est_frames.min(u32::MAX as usize) as u32, Ordering::Relaxed);
-    let mut stdout = child.stdout.take().ok_or("ffmpeg: no stdout pipe")?;
+    progress.total.store(
+        est_frames.min(u64::from(u32::MAX)) as u32,
+        Ordering::Relaxed,
+    );
+    let Some(mut stdout) = stdout else {
+        kill(&child);
+        let _ = finish(&child);
+        return Err(PredecodeError::Failed("ffmpeg: no stdout pipe".into()));
+    };
 
-    let mut frames = Vec::with_capacity(est_frames);
-    let mut delays_ms = Vec::with_capacity(est_frames);
+    let reserve = est_frames.min(budget_frames) as usize;
+    let mut frames = Vec::with_capacity(reserve);
+    let mut delays_ms = Vec::with_capacity(reserve);
     let mut buf = vec![0u8; frame_size];
 
-    while stdout.read_exact(&mut buf).is_ok() {
-        if progress.cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("cancelled".to_string());
+    let done = AtomicBool::new(false);
+    let stop = std::thread::scope(|s| {
+        // Without the watcher a cancel is seen only when the next frame
+        // arrives, which for a stalled ffmpeg is never.
+        let _ = std::thread::Builder::new()
+            .name("ffmpeg-cancel".into())
+            .spawn_scoped(s, || watch_cancel(&child, &progress.cancel, &done));
+        let stop = loop {
+            if stdout.read_exact(&mut buf).is_err() {
+                break Stop::End;
+            }
+            if progress.cancel.load(Ordering::Relaxed) {
+                break Stop::Cancelled;
+            }
+            if frames.len() as u64 >= budget_frames {
+                break Stop::OverBudget;
+            }
+            frames.push(DecodedFrame {
+                data: buf.clone(),
+                width: meta.width,
+                height: meta.height,
+            });
+            delays_ms.push(delay_ms.max(1));
+            progress.done.fetch_add(1, Ordering::Relaxed);
+        };
+        done.store(true, Ordering::Relaxed);
+        stop
+    });
+    drop(stdout);
+
+    // A cancel that killed ffmpeg ends the read like an end of file.
+    let stop = if progress.cancel.load(Ordering::Relaxed) {
+        Stop::Cancelled
+    } else {
+        stop
+    };
+    match stop {
+        Stop::End => {}
+        Stop::Cancelled => {
+            kill(&child);
+            let _ = finish(&child);
+            return Err(PredecodeError::Failed("cancelled".to_string()));
         }
-        frames.push(DecodedFrame {
-            data: buf.clone(),
-            width: meta.width,
-            height: meta.height,
-        });
-        delays_ms.push(delay_ms.max(1));
-        progress.done.fetch_add(1, Ordering::Relaxed);
+        Stop::OverBudget => {
+            kill(&child);
+            let _ = finish(&child);
+            return Err(PredecodeError::OverBudget(format!(
+                "pre-decoding went past the {} MiB budget at frame {} ({PREDECODE_MAX_MB_ENV})",
+                budget_bytes >> 20,
+                frames.len() + 1,
+            )));
+        }
     }
 
-    let _ = child.wait();
-
+    let (status, stderr) = finish(&child);
+    let exit_code = status.and_then(|s| s.code());
     if frames.is_empty() {
-        return Err("ffmpeg decoded zero frames".to_string());
+        return Err(PredecodeError::Failed(zero_frames_error(
+            exit_code, &stderr,
+        )));
+    }
+    if status.is_some_and(|s| !s.success()) {
+        log::warn!(
+            "ffmpeg exited with {status:?} after {} frames: {stderr}",
+            frames.len()
+        );
     }
 
     log::info!(
         "Decoded {} video frames ({}MB)",
         frames.len(),
-        (frames.len() * frame_size) / (1024 * 1024),
+        (frames.len() as u64 * frame_bytes) >> 20,
     );
 
     Ok((frames, delays_ms))
 }
 
-/// Maximum video duration (seconds) we'll pre-decode. Beyond this, reject.
-pub const MAX_PREDECODE_SECS: f64 = 60.0;
+/// Why the pre-decode read loop stopped.
+enum Stop {
+    End,
+    Cancelled,
+    OverBudget,
+}
+
+/// How often the cancel watcher looks at the flag.
+const CANCEL_POLL: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Kill `child` as soon as `cancel` is set, until `done`. The read loop
+/// checks `cancel` only between frames, so a stalled or slow ffmpeg would
+/// otherwise keep the decode (and the frames it holds) alive.
+fn watch_cancel(child: &Mutex<Child>, cancel: &AtomicBool, done: &AtomicBool) {
+    use std::sync::atomic::Ordering;
+    while !done.load(Ordering::Relaxed) {
+        if cancel.load(Ordering::Relaxed) {
+            if let Ok(mut c) = child.lock() {
+                let _ = c.kill();
+            }
+            return;
+        }
+        std::thread::sleep(CANCEL_POLL);
+    }
+}
 
 /// Everything a video source needs, in one call: the ffmpeg check, the probe,
 /// the pre-decode length cap and the decode itself, reporting through
@@ -207,12 +307,11 @@ pub fn decode_video(
         meta.fps,
         meta.duration_secs,
     );
-    if meta.duration_secs > MAX_PREDECODE_SECS {
+    let budget = predecode_budget_bytes();
+    if let Some(why) = predecode_refusal(&meta, MAX_PREDECODE_SECS, budget) {
         return Err(format!(
-            "Video too long for pre-decode ({:.0}s > {:.0}s max). \
-             Use a shorter clip or trim with ffmpeg.",
-            meta.duration_secs, MAX_PREDECODE_SECS,
+            "Video too large to pre-decode: {why}. Use a shorter or smaller clip."
         ));
     }
-    decode_all_frames(path, &meta, progress)
+    decode_all_frames(path, &meta, progress, budget).map_err(String::from)
 }

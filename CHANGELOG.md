@@ -21,6 +21,8 @@
 - **A `.pfx` whose particle `blend` or `render_mode` is misspelled now logs a warning naming the value,** and still loads and renders as before (additive, billboard). For code embedding the library: `ParticleDef::blend` and `render_mode`, `ParticleSystem::blend_mode` and `obstacle_source` are now enums (`ParticleBlend`, `ParticleRenderMode`, `Option<ObstacleSource>`) rather than strings; `.pfx` and preset files are unchanged.
 
 ### Fixed
+- **Adding a short but large video, such as 40 s of ultrawide footage, could take over 12 GB of RAM and push the machine into swap.** A clip is now pre-decoded only when its frames fit 2 GB (set `FOSFORA_PREDECODE_MAX_MB` to change it); a bigger one streams as it plays, as long clips already did. Dropping the same file twice no longer decodes it twice, and a video ffmpeg cannot read now reports ffmpeg's own error instead of "decoded zero frames".
+- **Cancelling a video that was loading did nothing while ffmpeg was stuck, such as on a slow network share, and the load kept its memory.** Cancel now stops the load within a fraction of a second.
 - **A binding whose target name was misspelled, such as `uniform.kik` or `postfx.vignete`, loaded and showed in the matrix but drove nothing, without a word.** Loading it now logs a warning naming the binding, and `fosfora --validate` lists the valid names; the binding is still kept in the file as written.
 - **A clock built from `beat_index + beat_phase` or `bar_index + bar_phase` jumped back a whole beat or bar for one frame after the beat grid nudged its timing later.** The phase wrapped a hop before its index stepped; it now wraps on the same hop. On a steady 120 BPM test track the locked beat clock went from three backward jumps in 20 s to none.
 
